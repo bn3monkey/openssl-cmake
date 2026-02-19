@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.bn3monkey.openssl_cmake"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.bn3monkey.openssl_cmake"
         minSdk = 35
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
