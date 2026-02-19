@@ -1,0 +1,17 @@
+function(detectTargetCompiler TARGET_OS OUT_VAR)
+    if ("${TARGET_OS}" STREQUAL "Windows")
+        include(cmake/detect_compiler/windows.cmake)
+        detectWindowsTargetCompiler(result)
+    elseif ("${TARGET_OS}" STREQUAL "Linux")
+        include(cmake/detect_compiler/linux.cmake)
+        detectLinuxTargetCompiler(result)
+    elseif ("${TARGET_OS}" STREQUAL "Android")
+        include(cmake/detect_compiler/android.cmake)
+        detectAndroidTargetCompiler(result)
+    else ()
+        message(FATAL_ERROR "[!!] Current OS is not supported")
+    endif()
+    
+    set(${OUT_VAR} "${result}" PARENT_SCOPE)
+
+endfunction()
