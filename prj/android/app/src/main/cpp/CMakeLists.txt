@@ -5,6 +5,14 @@
 # Sets the minimum CMake version required for this project.
 cmake_minimum_required(VERSION 3.22.1)
 
-project(openssl_cmake C CXX)
+project(openssl_cmake_android C CXX)
 
-add_subdirectory(../../../../../.. ${CMAKE_CURRENT_BINARY_DIR}/origin)
+# .. main
+# ../.. src
+# ../../.. app
+# ../../../.. android
+# ../../../../.. prj
+# ../../../../../..
+message(STATUS "CMAKE SOURCE DIR = ${CMAKE_SOURCE_DIR}")
+message(STATUS "CMAKE CURRENT SOURCE DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../" ${CMAKE_CURRENT_BINARY_DIR}/origin)

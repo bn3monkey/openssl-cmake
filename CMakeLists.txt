@@ -1,7 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
 project(openssl-cmake C CXX)
-set(OPENSSL_VERSION 3.6.1)
 
 enable_language(C)
 enable_language(CXX)
@@ -26,15 +25,33 @@ detectTargetCompiler("${TARGET_OS}" TARGET_COMPILER)
 message(STATUS "Target Compiler : ${TARGET_COMPILER}")
 
 
+set(OPENSSL_VERSION 3.6.1)
+
 # ===========================================================================
 # DOWNLOAD OPENSSL SOURCE
 # ===========================================================================
 include(FetchContent)
+set(OpenSSL_URL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz")
+message(STATUS "OpenSSL URL : ${OpenSSL_URL}")
+
+if (NOT ANDROID)
 FetchContent_Declare(
     OpenSSL
-    URL https://github.com/openssl/openssl/archive/refs/tags/openssl-${OPENSSL_VERSION}.tar.gz
+    URL "${OpenSSL_URL}"
+    URL_HASH SHA256=b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
+else()
+    FetchContent_Declare(
+        OpenSSL
+        GIT_REPOSITORY https://github.com/openssl/openssl.git
+        GIT_TAG        openssl-${OPENSSL_VERSION}
+        GIT_SHALLOW    TRUE
+        GIT_PROGRESS   TRUE   # ← 이게 git clone --progress 와 동일
+        GIT_SUBMODULES "" 
+    )
+endif()
+
 FetchContent_MakeAvailable(OpenSSL)
 
 # FetchContent가 설정한 변수 확인
@@ -459,10 +476,291 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     message(STATUS "[OpenSSL] Linux build - 추후 구현 예정")
 
 # ===========================================================================
-# BUILD: Android  (추후 작성 예정)
+# BUILD: Android  (NDK clang 크로스컴파일)
 # ===========================================================================
 elseif ("${TARGET_OS}" STREQUAL "Android")
-    message(STATUS "[OpenSSL] Android build - 추후 구현 예정")
+
+    # -----------------------------------------------------------------------
+    # Step 1. Perl 획득 (호스트에서 실행 - 크로스컴파일 빌드 머신용)
+    # -----------------------------------------------------------------------
+    include(cmake/acquire_perl.cmake)
+    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+
+    # -----------------------------------------------------------------------
+    # Step 2. ANDROID_NDK_ROOT 결정
+    #   우선순위: CMake 변수 > 환경변수 ANDROID_NDK_ROOT > ANDROID_NDK_HOME
+    #   Android Studio는 CMAKE_ANDROID_NDK를 자동으로 설정해준다.
+    # -----------------------------------------------------------------------
+    if (NOT ANDROID_NDK_ROOT)
+        if (DEFINED CMAKE_ANDROID_NDK AND CMAKE_ANDROID_NDK)
+            set(ANDROID_NDK_ROOT "${CMAKE_ANDROID_NDK}")
+        elseif (DEFINED ENV{ANDROID_NDK_ROOT} AND EXISTS "$ENV{ANDROID_NDK_ROOT}")
+            set(ANDROID_NDK_ROOT "$ENV{ANDROID_NDK_ROOT}")
+        elseif (DEFINED ENV{ANDROID_NDK_HOME} AND EXISTS "$ENV{ANDROID_NDK_HOME}")
+            set(ANDROID_NDK_ROOT "$ENV{ANDROID_NDK_HOME}")
+        else()
+            message(FATAL_ERROR
+                "[OpenSSL] ANDROID_NDK_ROOT를 찾을 수 없습니다.\n"
+                "다음 중 하나를 설정하세요:\n"
+                "  - CMAKE_ANDROID_NDK (CMake 변수, Android Studio 자동 설정)\n"
+                "  - ANDROID_NDK_ROOT  (환경변수)\n"
+                "  - ANDROID_NDK_HOME  (환경변수)"
+            )
+        endif()
+    endif()
+    message(STATUS "[OpenSSL] ANDROID_NDK_ROOT : ${ANDROID_NDK_ROOT}")
+
+    # -----------------------------------------------------------------------
+    # Step 3. NDK LLVM 툴체인 bin 디렉토리 결정
+    #   경로: <ndk>/toolchains/llvm/prebuilt/<host-tag>/bin
+    #   host-tag: linux-x86_64 / darwin-x86_64|arm64 / windows-x86_64
+    # -----------------------------------------------------------------------
+    if (CMAKE_HOST_WIN32)
+        set(_ndk_host_tag "windows-x86_64")
+    elseif (CMAKE_HOST_APPLE)
+        if (EXISTS "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/darwin-arm64")
+            set(_ndk_host_tag "darwin-arm64")   # Apple Silicon Mac
+        else()
+            set(_ndk_host_tag "darwin-x86_64")  # Intel Mac
+        endif()
+    else()
+        set(_ndk_host_tag "linux-x86_64")
+    endif()
+
+    set(_ndk_llvm_bin "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/${_ndk_host_tag}/bin")
+    if (NOT EXISTS "${_ndk_llvm_bin}")
+        message(FATAL_ERROR
+            "[OpenSSL] NDK LLVM bin 디렉토리를 찾을 수 없습니다:\n"
+            "  ${_ndk_llvm_bin}\n"
+            "NDK 경로와 버전을 확인하세요."
+        )
+    endif()
+    message(STATUS "[OpenSSL] NDK LLVM bin : ${_ndk_llvm_bin}")
+
+    # -----------------------------------------------------------------------
+    # Step 4. 아키텍처별 OpenSSL configure 타겟 결정
+    #   ANDROID_ABI (Gradle abiFilters) → OpenSSL Configure 타겟명
+    # -----------------------------------------------------------------------
+    if ("${ANDROID_ABI}" STREQUAL "arm64-v8a")
+        set(_openssl_configure_target "android-arm64")
+    elseif ("${ANDROID_ABI}" STREQUAL "armeabi-v7a")
+        set(_openssl_configure_target "android-arm")
+    elseif ("${ANDROID_ABI}" STREQUAL "x86_64")
+        set(_openssl_configure_target "android-x86_64")
+    elseif ("${ANDROID_ABI}" STREQUAL "x86")
+        set(_openssl_configure_target "android-x86")
+    else()
+        message(FATAL_ERROR
+            "[OpenSSL] 지원하지 않는 Android ABI: ${ANDROID_ABI}\n"
+            "지원 목록: arm64-v8a, armeabi-v7a, x86_64, x86"
+        )
+    endif()
+    message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
+
+    # -----------------------------------------------------------------------
+    # Step 5. Android API 레벨 결정
+    #   ANDROID_PLATFORM = "android-35" 형식 → 숫자만 추출
+    #   또는 ANDROID_NATIVE_API_LEVEL (숫자 그대로)
+    # -----------------------------------------------------------------------
+    if (ANDROID_PLATFORM)
+        string(REGEX REPLACE "^android-" "" _api_level "${ANDROID_PLATFORM}")
+    elseif (ANDROID_NATIVE_API_LEVEL)
+        set(_api_level "${ANDROID_NATIVE_API_LEVEL}")
+    else()
+        set(_api_level "21")
+        message(WARNING "[OpenSSL] Android API 레벨을 감지할 수 없어 기본값 21을 사용합니다.")
+    endif()
+    message(STATUS "[OpenSSL] Android API level : ${_api_level}")
+
+    # -----------------------------------------------------------------------
+    # 빌드 타입 결정
+    # -----------------------------------------------------------------------
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
+    if (_build_type_lower STREQUAL "debug")
+        set(_openssl_debug_flags "--debug")
+        message(STATUS "[OpenSSL] Build type : Debug (debug symbols ON)")
+    else()
+        set(_openssl_debug_flags "")
+        message(STATUS "[OpenSSL] Build type : ${CMAKE_BUILD_TYPE} (debug symbols OFF)")
+    endif()
+
+    # -----------------------------------------------------------------------
+    # Step 6. perl Configure 실행 (CMake configure-time)
+    #
+    # OpenSSL Configure가 NDK를 찾기 위해 필요한 환경변수:
+    #   ANDROID_NDK_ROOT - NDK 루트 경로
+    #   PATH             - NDK clang(.cmd), llvm-ar 등이 포함된 bin
+    #
+    # Windows 호스트:
+    #   Strawberry Perl(네이티브 Windows)을 사용하므로 cmd.exe 기반으로 동작.
+    #   PATH에 NDK bin을 추가하면 .cmd 래퍼를 정상 탐색한다.
+    # -----------------------------------------------------------------------
+    file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
+
+    # PATH 구분자: Windows=';', Linux/Mac=':'
+    if (CMAKE_HOST_WIN32)
+        set(_path_sep ";")
+    else()
+        set(_path_sep ":")
+    endif()
+
+    set(ENV{ANDROID_NDK_ROOT} "${ANDROID_NDK_ROOT}")
+    set(ENV{PATH} "${_ndk_llvm_bin}${_path_sep}${PERL_BIN_DIR}${_path_sep}$ENV{PATH}")
+
+    message(STATUS "[OpenSSL] Running: perl Configure ${_openssl_configure_target} -D__ANDROID_API__=${_api_level} ${_openssl_debug_flags}")
+    message(STATUS "[OpenSSL]   source : ${openssl_SOURCE_DIR}")
+    message(STATUS "[OpenSSL]   build  : ${openssl_BINARY_DIR}")
+
+    execute_process(
+        COMMAND
+            "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
+            "${_openssl_configure_target}"
+            -D__ANDROID_API__=${_api_level}
+            ${_openssl_debug_flags}
+            no-shared       # 정적 라이브러리만 빌드
+            no-makedepend   # 빌드 속도 향상
+        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+        RESULT_VARIABLE   _configure_result
+        OUTPUT_VARIABLE   _configure_output
+        ERROR_VARIABLE    _configure_error
+        ECHO_OUTPUT_VARIABLE
+        ECHO_ERROR_VARIABLE
+    )
+
+    if (NOT _configure_result EQUAL 0)
+        message(FATAL_ERROR
+            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "${_configure_error}"
+        )
+    endif()
+
+    message(STATUS "[OpenSSL] Configure 완료.")
+
+    # -----------------------------------------------------------------------
+    # Step 7. make 빌드 → libcrypto.a, libssl.a 생성
+    # -----------------------------------------------------------------------
+    set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
+    set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
+    set(_openssl_include
+        "${openssl_BINARY_DIR}/include"
+        "${openssl_SOURCE_DIR}/include"
+    )
+
+    include(ProcessorCount)
+    ProcessorCount(_cpu_count)
+    if (_cpu_count EQUAL 0)
+        set(_cpu_count 4)
+    endif()
+    message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
+
+    if (CMAKE_HOST_WIN32)
+        # Windows 호스트: NDK 번들 make.exe 사용
+        #   NDK 번들: <ndk>/prebuilt/windows-x86_64/bin/make.exe
+        #
+        # Strawberry Perl의 c/bin 에는 sh.exe 등 Unix 도구가 포함되어 있어
+        # OpenSSL Makefile의 SHELL 명령 실행에 사용된다.
+        #   PERL_BIN_DIR    : .../tools/perl/perl/bin
+        #   _strawberry_bin : .../tools/perl/c/bin   (sh.exe 위치)
+        set(_ndk_make "${ANDROID_NDK_ROOT}/prebuilt/${_ndk_host_tag}/bin/make.exe")
+        if (NOT EXISTS "${_ndk_make}")
+            message(FATAL_ERROR
+                "[OpenSSL] NDK make.exe를 찾을 수 없습니다:\n"
+                "  ${_ndk_make}"
+            )
+        endif()
+        message(STATUS "[OpenSSL] make : ${_ndk_make}")
+
+        # PERL_BIN_DIR 에서 Strawberry 루트(c/bin) 경로 도출
+        # perl.exe 경로: <root>/perl/bin/perl.exe → 두 단계 위가 <root>
+        get_filename_component(_strawberry_perl_dir "${PERL_BIN_DIR}" DIRECTORY)
+        get_filename_component(_strawberry_root     "${_strawberry_perl_dir}" DIRECTORY)
+        set(_strawberry_bin "${_strawberry_root}/c/bin")
+
+        add_custom_command(
+            OUTPUT
+                "${_openssl_crypto_lib}"
+                "${_openssl_ssl_lib}"
+            COMMAND ${CMAKE_COMMAND} -E env
+                "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
+                "PATH=${_ndk_llvm_bin}$<SEMICOLON>${PERL_BIN_DIR}$<SEMICOLON>${_strawberry_bin}$<SEMICOLON>$ENV{PATH}"
+                "${_ndk_make}" -j${_cpu_count} build_libs
+            WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+            USES_TERMINAL
+            VERBATIM
+        )
+    else()
+        # Linux / macOS 호스트: 시스템 make 직접 실행
+        find_program(_make_exe
+            NAMES make gmake
+            DOC "make for Android OpenSSL build"
+        )
+        if (NOT _make_exe)
+            message(FATAL_ERROR
+                "[OpenSSL] make를 찾을 수 없습니다.\n"
+                "시스템에 make 또는 gmake가 설치되어 있는지 확인하세요."
+            )
+        endif()
+        message(STATUS "[OpenSSL] make : ${_make_exe}")
+
+        add_custom_command(
+            OUTPUT
+                "${_openssl_crypto_lib}"
+                "${_openssl_ssl_lib}"
+            COMMAND ${CMAKE_COMMAND} -E env
+                "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
+                "PATH=${_ndk_llvm_bin}:${PERL_BIN_DIR}:$ENV{PATH}"
+                "${_make_exe}" -j${_cpu_count} build_libs
+            WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+            USES_TERMINAL
+            VERBATIM
+        )
+    endif()
+
+    add_custom_target(openssl_make_build ALL
+        DEPENDS
+            "${_openssl_crypto_lib}"
+            "${_openssl_ssl_lib}"
+        COMMENT "[OpenSSL] Ensuring OpenSSL libraries are built."
+    )
+
+    # -----------------------------------------------------------------------
+    # IMPORTED 정적 라이브러리 타겟 생성
+    # Android에서는 ws2_32/crypt32 같은 Windows 전용 링크 불필요
+    # -----------------------------------------------------------------------
+    add_library(openssl_crypto STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_crypto PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_crypto_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+    add_dependencies(openssl_crypto openssl_make_build)
+
+    add_library(openssl_ssl STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_ssl PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_ssl_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+    )
+    add_dependencies(openssl_ssl openssl_make_build)
+
+    # 표준 네임스페이스 별칭
+    add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::Crypto PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    add_library(OpenSSL::SSL INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::SSL PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_ssl;openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    message(STATUS "[OpenSSL] Android build targets ready: OpenSSL::Crypto, OpenSSL::SSL (make -j${_cpu_count})")
+    message(STATUS "[OpenSSL]   ABI    : ${ANDROID_ABI} → ${_openssl_configure_target}")
+    message(STATUS "[OpenSSL]   API    : android-${_api_level}")
+    message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
 
 else()
     message(FATAL_ERROR

@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.bn3monkey.openssl_cmake"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.bn3monkey.openssl_cmake"
-        minSdk = 36
-        targetSdk = 36
+        minSdk = 35
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
@@ -19,6 +19,9 @@ android {
             cmake {
                 cppFlags += "-std=c++14"
             }
+        }
+        ndk {
+                abiFilters += "arm64-v8a"
         }
     }
 
