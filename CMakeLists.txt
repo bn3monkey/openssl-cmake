@@ -589,43 +589,71 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     #
     # OpenSSL Configure가 NDK를 찾기 위해 필요한 환경변수:
     #   ANDROID_NDK_ROOT - NDK 루트 경로
-    #   PATH             - NDK clang(.cmd), llvm-ar 등이 포함된 bin
+    #   PATH             - NDK clang, llvm-ar 등이 포함된 bin
     #
-    # Windows 호스트:
-    #   Strawberry Perl(네이티브 Windows)을 사용하므로 cmd.exe 기반으로 동작.
-    #   PATH에 NDK bin을 추가하면 .cmd 래퍼를 정상 탐색한다.
+    # Windows 호스트 - MSYS2 bash 경유 필수:
+    #   OpenSSL 15-android.conf가 Perl의 -f 연산자로 풀 경로 체크:
+    #     -f "$ndk/toolchains/.../bin/aarch64-linux-android-clang"
+    #   NDK R25+ Windows는 .cmd 파일만 있어 네이티브 Perl에서는 -f 실패.
+    #   MSYS2 bash 안에서 실행하면 POSIX 레이어가 .cmd를 확장자 없이 노출.
+    #   → cygpath으로 경로를 Unix 형식으로 변환한 뒤 bash를 경유해 실행.
     # -----------------------------------------------------------------------
     file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
-
-    # PATH 구분자: Windows=';', Linux/Mac=':'
-    if (CMAKE_HOST_WIN32)
-        set(_path_sep ";")
-    else()
-        set(_path_sep ":")
-    endif()
-
-    set(ENV{ANDROID_NDK_ROOT} "${ANDROID_NDK_ROOT}")
-    set(ENV{PATH} "${_ndk_llvm_bin}${_path_sep}${PERL_BIN_DIR}${_path_sep}$ENV{PATH}")
 
     message(STATUS "[OpenSSL] Running: perl Configure ${_openssl_configure_target} -D__ANDROID_API__=${_api_level} ${_openssl_debug_flags}")
     message(STATUS "[OpenSSL]   source : ${openssl_SOURCE_DIR}")
     message(STATUS "[OpenSSL]   build  : ${openssl_BINARY_DIR}")
 
-    execute_process(
-        COMMAND
-            "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
-            "${_openssl_configure_target}"
-            -D__ANDROID_API__=${_api_level}
-            ${_openssl_debug_flags}
-            no-shared       # 정적 라이브러리만 빌드
-            no-makedepend   # 빌드 속도 향상
-        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
-        RESULT_VARIABLE   _configure_result
-        OUTPUT_VARIABLE   _configure_output
-        ERROR_VARIABLE    _configure_error
-        ECHO_OUTPUT_VARIABLE
-        ECHO_ERROR_VARIABLE
-    )
+    if (CMAKE_HOST_WIN32)
+        # acquire_perl/mingw.cmake 가 _msys2_bash 설정 (_msys2_root/usr/bin/bash.exe)
+        if (NOT _msys2_bash OR NOT EXISTS "${_msys2_bash}")
+            message(FATAL_ERROR
+                "[OpenSSL] MSYS2 bash를 찾을 수 없습니다: ${_msys2_bash}\n"
+                "Perl 획득 단계(MSYS2)가 정상적으로 완료되었는지 확인하세요."
+            )
+        endif()
+
+        # cygpath으로 Windows 경로 → MSYS2/Unix 경로 변환 (C:/foo → /c/foo)
+        # bash -l : 로그인 셸 → cygpath, make 등 MSYS2 표준 도구 PATH 포함
+        string(CONCAT _bash_configure_cmd
+            "set -e"
+            " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
+            " && export PATH=$(cygpath -u '${_ndk_llvm_bin}'):$PATH"
+            " && cd $(cygpath -u '${openssl_BINARY_DIR}')"
+            " && perl $(cygpath -u '${openssl_SOURCE_DIR}/Configure')"
+            " '${_openssl_configure_target}'"
+            " '-D__ANDROID_API__=${_api_level}'"
+            " ${_openssl_debug_flags}"
+            " no-shared no-makedepend"
+        )
+        execute_process(
+            COMMAND "${_msys2_bash}" -l -c "${_bash_configure_cmd}"
+            RESULT_VARIABLE   _configure_result
+            OUTPUT_VARIABLE   _configure_output
+            ERROR_VARIABLE    _configure_error
+            ECHO_OUTPUT_VARIABLE
+            ECHO_ERROR_VARIABLE
+        )
+    else()
+        # Linux / macOS 호스트: perl 직접 실행
+        set(ENV{ANDROID_NDK_ROOT} "${ANDROID_NDK_ROOT}")
+        set(ENV{PATH} "${_ndk_llvm_bin}:${PERL_BIN_DIR}:$ENV{PATH}")
+        execute_process(
+            COMMAND
+                "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
+                "${_openssl_configure_target}"
+                -D__ANDROID_API__=${_api_level}
+                ${_openssl_debug_flags}
+                no-shared       # 정적 라이브러리만 빌드
+                no-makedepend   # 빌드 속도 향상
+            WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+            RESULT_VARIABLE   _configure_result
+            OUTPUT_VARIABLE   _configure_output
+            ERROR_VARIABLE    _configure_error
+            ECHO_OUTPUT_VARIABLE
+            ECHO_ERROR_VARIABLE
+        )
+    endif()
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
@@ -654,38 +682,22 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
 
     if (CMAKE_HOST_WIN32)
-        # Windows 호스트: NDK 번들 make.exe 사용
-        #   NDK 번들: <ndk>/prebuilt/windows-x86_64/bin/make.exe
-        #
-        # Strawberry Perl의 c/bin 에는 sh.exe 등 Unix 도구가 포함되어 있어
-        # OpenSSL Makefile의 SHELL 명령 실행에 사용된다.
-        #   PERL_BIN_DIR    : .../tools/perl/perl/bin
-        #   _strawberry_bin : .../tools/perl/c/bin   (sh.exe 위치)
-        set(_ndk_make "${ANDROID_NDK_ROOT}/prebuilt/${_ndk_host_tag}/bin/make.exe")
-        if (NOT EXISTS "${_ndk_make}")
-            message(FATAL_ERROR
-                "[OpenSSL] NDK make.exe를 찾을 수 없습니다:\n"
-                "  ${_ndk_make}"
-            )
-        endif()
-        message(STATUS "[OpenSSL] make : ${_ndk_make}")
-
-        # PERL_BIN_DIR 에서 Strawberry 루트(c/bin) 경로 도출
-        # perl.exe 경로: <root>/perl/bin/perl.exe → 두 단계 위가 <root>
-        get_filename_component(_strawberry_perl_dir "${PERL_BIN_DIR}" DIRECTORY)
-        get_filename_component(_strawberry_root     "${_strawberry_perl_dir}" DIRECTORY)
-        set(_strawberry_bin "${_strawberry_root}/c/bin")
-
+        # Windows 호스트: Configure와 동일하게 MSYS2 bash를 경유
+        # MSYS2 bash -l 로드 시 /usr/bin/make 가 PATH에 포함되므로 별도 탐색 불필요
+        string(CONCAT _bash_make_cmd
+            "set -e"
+            " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
+            " && export PATH=$(cygpath -u '${_ndk_llvm_bin}'):$PATH"
+            " && cd $(cygpath -u '${openssl_BINARY_DIR}')"
+            " && make -j${_cpu_count} build_libs"
+        )
         add_custom_command(
             OUTPUT
                 "${_openssl_crypto_lib}"
                 "${_openssl_ssl_lib}"
-            COMMAND ${CMAKE_COMMAND} -E env
-                "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
-                "PATH=${_ndk_llvm_bin}$<SEMICOLON>${PERL_BIN_DIR}$<SEMICOLON>${_strawberry_bin}$<SEMICOLON>$ENV{PATH}"
-                "${_ndk_make}" -j${_cpu_count} build_libs
+            COMMAND "${_msys2_bash}" -l -c "${_bash_make_cmd}"
             WORKING_DIRECTORY "${openssl_BINARY_DIR}"
-            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs (MSYS2)..."
             USES_TERMINAL
             VERBATIM
         )
