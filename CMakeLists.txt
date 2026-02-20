@@ -30,37 +30,12 @@ set(OPENSSL_VERSION 3.6.1)
 # ===========================================================================
 # DOWNLOAD OPENSSL SOURCE
 # ===========================================================================
-include(FetchContent)
-set(OpenSSL_URL "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz")
-message(STATUS "OpenSSL URL : ${OpenSSL_URL}")
+# openssl_SOURCE_DIR → ${CMAKE_CURRENT_SOURCE_DIR}/external/openssl
+include(cmake/download_openssl.cmake)
 
-if (NOT ANDROID)
-FetchContent_Declare(
-    OpenSSL
-    URL "${OpenSSL_URL}"
-    URL_HASH SHA256=b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-else()
-    FetchContent_Declare(
-        OpenSSL
-        GIT_REPOSITORY https://github.com/openssl/openssl.git
-        GIT_TAG        openssl-${OPENSSL_VERSION}
-        GIT_SHALLOW    TRUE
-        GIT_PROGRESS   TRUE   # ← 이게 git clone --progress 와 동일
-        GIT_SUBMODULES "" 
-    )
-endif()
+# openssl_BINARY_DIR : 빌드 출력 위치 (libcrypto.a, libssl.a 등)
+set(openssl_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
-FetchContent_MakeAvailable(OpenSSL)
-
-# FetchContent가 설정한 변수 확인
-# FetchContent_Declare 이름 "OpenSSL" → 소문자 변수
-#   openssl_SOURCE_DIR : 소스 코드 위치 (_deps/openssl-src)
-#   openssl_BINARY_DIR : 빌드 출력 위치 (_deps/openssl-build)
-if (NOT openssl_SOURCE_DIR)
-    message(FATAL_ERROR "[OpenSSL] openssl_SOURCE_DIR is not set. FetchContent failed?")
-endif()
 message(STATUS "OpenSSL source dir : ${openssl_SOURCE_DIR}")
 message(STATUS "OpenSSL build dir  : ${openssl_BINARY_DIR}")
 
@@ -470,10 +445,166 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
     message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
 
 # ===========================================================================
-# BUILD: Linux  (추후 작성 예정)
+# BUILD: Linux
 # ===========================================================================
 elseif ("${TARGET_OS}" STREQUAL "Linux")
-    message(STATUS "[OpenSSL] Linux build - 추후 구현 예정")
+
+    # -----------------------------------------------------------------------
+    # Step 1. Perl 획득 (시스템 Perl 사용)
+    # -----------------------------------------------------------------------
+    include(cmake/acquire_perl.cmake)
+    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+
+    # -----------------------------------------------------------------------
+    # Step 2. 아키텍처별 OpenSSL configure 타겟 결정
+    # -----------------------------------------------------------------------
+    if ("${TARGET_ARCH}" STREQUAL "x64")
+        set(_openssl_configure_target "linux-x86_64")
+    elseif ("${TARGET_ARCH}" STREQUAL "x86")
+        set(_openssl_configure_target "linux-x86")
+    elseif ("${TARGET_ARCH}" STREQUAL "arm64")
+        set(_openssl_configure_target "linux-aarch64")
+    elseif ("${TARGET_ARCH}" STREQUAL "arm")
+        set(_openssl_configure_target "linux-armv4")
+    else()
+        message(FATAL_ERROR
+            "[OpenSSL] Linux 빌드에서 지원하지 않는 아키텍처: ${TARGET_ARCH}\n"
+            "지원 목록: x86, x64, arm64, arm"
+        )
+    endif()
+    message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
+
+    # -----------------------------------------------------------------------
+    # 빌드 타입 결정
+    # -----------------------------------------------------------------------
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
+    if (_build_type_lower STREQUAL "debug")
+        set(_openssl_debug_flags "--debug")
+        message(STATUS "[OpenSSL] Build type : Debug (debug symbols ON)")
+    else()
+        set(_openssl_debug_flags "")
+        message(STATUS "[OpenSSL] Build type : ${CMAKE_BUILD_TYPE} (debug symbols OFF)")
+    endif()
+
+    # -----------------------------------------------------------------------
+    # Step 3. perl Configure 실행 (CMake configure-time)
+    # -----------------------------------------------------------------------
+    file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
+
+    message(STATUS "[OpenSSL] Running: perl Configure ${_openssl_configure_target} ${_openssl_debug_flags}")
+    message(STATUS "[OpenSSL]   source : ${openssl_SOURCE_DIR}")
+    message(STATUS "[OpenSSL]   build  : ${openssl_BINARY_DIR}")
+
+    execute_process(
+        COMMAND
+            "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
+            "${_openssl_configure_target}"
+            ${_openssl_debug_flags}
+            no-shared       # 정적 라이브러리만 빌드
+            no-makedepend   # 빌드 속도 향상
+        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+        RESULT_VARIABLE   _configure_result
+        OUTPUT_VARIABLE   _configure_output
+        ERROR_VARIABLE    _configure_error
+        ECHO_OUTPUT_VARIABLE
+        ECHO_ERROR_VARIABLE
+    )
+
+    if (NOT _configure_result EQUAL 0)
+        message(FATAL_ERROR
+            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "${_configure_error}"
+        )
+    endif()
+
+    message(STATUS "[OpenSSL] Configure 완료.")
+
+    # -----------------------------------------------------------------------
+    # Step 4. make 빌드 → libcrypto.a, libssl.a 생성
+    # -----------------------------------------------------------------------
+    set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
+    set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
+    set(_openssl_include
+        "${openssl_BINARY_DIR}/include"
+        "${openssl_SOURCE_DIR}/include"
+    )
+
+    find_program(_linux_make_exe
+        NAMES make gmake
+        DOC "make for Linux OpenSSL build"
+    )
+    if (NOT _linux_make_exe)
+        message(FATAL_ERROR
+            "[OpenSSL] make를 찾을 수 없습니다.\n"
+            "패키지 매니저로 설치하세요:\n"
+            "  Ubuntu/Debian : sudo apt install make\n"
+            "  Fedora/RHEL   : sudo dnf install make\n"
+            "  Arch          : sudo pacman -S make"
+        )
+    endif()
+    message(STATUS "[OpenSSL] make : ${_linux_make_exe}")
+
+    include(ProcessorCount)
+    ProcessorCount(_cpu_count)
+    if (_cpu_count EQUAL 0)
+        set(_cpu_count 4)
+    endif()
+    message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
+
+    add_custom_command(
+        OUTPUT
+            "${_openssl_crypto_lib}"
+            "${_openssl_ssl_lib}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PATH=${PERL_BIN_DIR}:$ENV{PATH}"
+            "${_linux_make_exe}" -j${_cpu_count} build_libs
+        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+        COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+        USES_TERMINAL
+        VERBATIM
+    )
+
+    add_custom_target(openssl_make_build ALL
+        DEPENDS
+            "${_openssl_crypto_lib}"
+            "${_openssl_ssl_lib}"
+        COMMENT "[OpenSSL] Ensuring OpenSSL libraries are built."
+    )
+
+    # -----------------------------------------------------------------------
+    # IMPORTED 정적 라이브러리 타겟 생성
+    # -----------------------------------------------------------------------
+    add_library(openssl_crypto STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_crypto PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_crypto_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+        INTERFACE_LINK_LIBRARIES      "pthread;dl"
+    )
+    add_dependencies(openssl_crypto openssl_make_build)
+
+    add_library(openssl_ssl STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_ssl PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_ssl_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+    )
+    add_dependencies(openssl_ssl openssl_make_build)
+
+    # 표준 네임스페이스 별칭
+    add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::Crypto PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    add_library(OpenSSL::SSL INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::SSL PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_ssl;openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    message(STATUS "[OpenSSL] Linux build targets ready: OpenSSL::Crypto, OpenSSL::SSL (make -j${_cpu_count})")
+    message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
 
 # ===========================================================================
 # BUILD: Android  (NDK clang 크로스컴파일)
