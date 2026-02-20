@@ -613,14 +613,17 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             )
         endif()
 
-        # cygpath으로 Windows 경로 → MSYS2/Unix 경로 변환 (C:/foo → /c/foo)
-        # bash -l : 로그인 셸 → cygpath, make 등 MSYS2 표준 도구 PATH 포함
+        # ANDROID_NDK_ROOT / PATH 는 MSYS2 bash가 NDK clang을 탐색해야 하므로 cygpath 변환
+        # cd / perl 경로는 Windows 경로 그대로 사용:
+        #   → perl이 소스 경로를 Windows 형식(D:/...)으로 Makefile에 기록
+        #   → NDK make.exe가 configdata.pm 의존성 파일을 올바르게 찾을 수 있음
+        # bash -l : 로그인 셸 → MSYS2 표준 도구 PATH 포함
         string(CONCAT _bash_configure_cmd
             "set -e"
             " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
             " && export PATH=$(cygpath -u '${_ndk_llvm_bin}'):$PATH"
-            " && cd $(cygpath -u '${openssl_BINARY_DIR}')"
-            " && perl $(cygpath -u '${openssl_SOURCE_DIR}/Configure')"
+            " && cd '${openssl_BINARY_DIR}'"
+            " && perl '${openssl_SOURCE_DIR}/Configure'"
             " '${_openssl_configure_target}'"
             " '-D__ANDROID_API__=${_api_level}'"
             " ${_openssl_debug_flags}"
@@ -681,15 +684,33 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     endif()
     message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
 
+    # NDK 내장 make 결정: 호스트 OS별 실행 파일명만 다름
+    #   _ndk_host_tag 는 Step 3에서 이미 결정됨
+    #   Windows : <ndk>/prebuilt/windows-x86_64/bin/make.exe
+    #   Linux   : <ndk>/prebuilt/linux-x86_64/bin/make
+    #   macOS   : <ndk>/prebuilt/darwin-x86_64|arm64/bin/make
     if (CMAKE_HOST_WIN32)
-        # Windows 호스트: Configure와 동일하게 MSYS2 bash를 경유
-        # MSYS2 bash -l 로드 시 /usr/bin/make 가 PATH에 포함되므로 별도 탐색 불필요
+        set(_ndk_make_exe "${ANDROID_NDK_ROOT}/prebuilt/${_ndk_host_tag}/bin/make.exe")
+    else()
+        set(_ndk_make_exe "${ANDROID_NDK_ROOT}/prebuilt/${_ndk_host_tag}/bin/make")
+    endif()
+    if (NOT EXISTS "${_ndk_make_exe}")
+        message(FATAL_ERROR
+            "[OpenSSL] NDK 내장 make를 찾을 수 없습니다:\n"
+            "  ${_ndk_make_exe}\n"
+            "NDK 경로와 버전을 확인하세요."
+        )
+    endif()
+    message(STATUS "[OpenSSL] NDK make : ${_ndk_make_exe}")
+
+    if (CMAKE_HOST_WIN32)
+        # Windows 호스트: MSYS2 bash를 경유, NDK make.exe를 cygpath로 변환해 직접 호출
         string(CONCAT _bash_make_cmd
             "set -e"
             " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
             " && export PATH=$(cygpath -u '${_ndk_llvm_bin}'):$PATH"
             " && cd $(cygpath -u '${openssl_BINARY_DIR}')"
-            " && make -j${_cpu_count} build_libs"
+            " && $(cygpath -u '${_ndk_make_exe}') -j${_cpu_count} build_libs"
         )
         add_custom_command(
             OUTPUT
@@ -697,24 +718,12 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
                 "${_openssl_ssl_lib}"
             COMMAND "${_msys2_bash}" -l -c "${_bash_make_cmd}"
             WORKING_DIRECTORY "${openssl_BINARY_DIR}"
-            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs (MSYS2)..."
+            COMMENT "[OpenSSL] Building OpenSSL with NDK make -j${_cpu_count} build_libs (MSYS2)..."
             USES_TERMINAL
             VERBATIM
         )
     else()
-        # Linux / macOS 호스트: 시스템 make 직접 실행
-        find_program(_make_exe
-            NAMES make gmake
-            DOC "make for Android OpenSSL build"
-        )
-        if (NOT _make_exe)
-            message(FATAL_ERROR
-                "[OpenSSL] make를 찾을 수 없습니다.\n"
-                "시스템에 make 또는 gmake가 설치되어 있는지 확인하세요."
-            )
-        endif()
-        message(STATUS "[OpenSSL] make : ${_make_exe}")
-
+        # Linux / macOS 호스트: NDK 내장 make 직접 실행
         add_custom_command(
             OUTPUT
                 "${_openssl_crypto_lib}"
@@ -722,9 +731,9 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             COMMAND ${CMAKE_COMMAND} -E env
                 "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT}"
                 "PATH=${_ndk_llvm_bin}:${PERL_BIN_DIR}:$ENV{PATH}"
-                "${_make_exe}" -j${_cpu_count} build_libs
+                "${_ndk_make_exe}" -j${_cpu_count} build_libs
             WORKING_DIRECTORY "${openssl_BINARY_DIR}"
-            COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+            COMMENT "[OpenSSL] Building OpenSSL with NDK make -j${_cpu_count} build_libs..."
             USES_TERMINAL
             VERBATIM
         )

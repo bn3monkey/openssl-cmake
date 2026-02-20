@@ -16,19 +16,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // Example of a call to a native method
-        binding.sampleText.text = stringFromJNI()
+        binding.sampleText.text = "sans"
     }
 
-    /**
-     * A native method that is implemented by the 'openssl_cmake' native library,
-     * which is packaged with this application.
-     */
-    external fun stringFromJNI(): String
-
-    companion object {
-        // Used to load the 'openssl_cmake' library on application startup.
-        init {
-            System.loadLibrary("openssl_cmake")
-        }
-    }
 }

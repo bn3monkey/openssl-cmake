@@ -16,3 +16,16 @@ project(openssl_cmake_android C CXX)
 message(STATUS "CMAKE SOURCE DIR = ${CMAKE_SOURCE_DIR}")
 message(STATUS "CMAKE CURRENT SOURCE DIR = ${CMAKE_CURRENT_SOURCE_DIR}")
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../" ${CMAKE_CURRENT_BINARY_DIR}/origin)
+
+add_library(
+        openssl_cmake_android
+        SHARED
+        native-lib.cpp
+)
+target_link_libraries(
+        openssl_cmake_android
+
+        OpenSSL::Crypto
+        OpenSSL::SSL
+        log
+)

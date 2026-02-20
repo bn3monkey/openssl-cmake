@@ -18,10 +18,15 @@ if (CMAKE_HOST_WIN32)
     # -------------------------------------------------------------------------
     # Windows 호스트: MSYS2 환경 사용 (bash + perl 포함)
     #
-    # 이유: OpenSSL의 15-android.conf가 크로스컴파일러를 Perl -f 연산자로
-    #       풀 경로 체크하는데, NDK R25+ Windows는 .cmd 파일만 제공한다.
-    #       MSYS2 bash 안에서 perl을 실행해야 MSYS2 POSIX 레이어가
-    #       .cmd 파일을 확장자 없이 노출시켜 -f 체크를 통과시킨다.
+    # 이유: NDK R25+ Windows에서 크로스컴파일러는 .cmd 래퍼로만 제공된다.
+    #       15-android.conf는 which("clang")으로 컴파일러를 탐색하는데,
+    #       MSYS2 bash 내에서 실행해야 POSIX 레이어가 .cmd를 확장자 없이 노출하여
+    #       which()가 컴파일러를 찾고 경로 정규식 매칭도 성공한다.
+    #
+    # Configure와 make 모두 MSYS2 bash 안에서 실행한다:
+    #   - Configure: MSYS2 perl + cygpath으로 경로 변환
+    #   - make: NDK prebuilt make.exe를 MSYS2 bash 내에서 호출
+    #           (NDK make는 MSYS2 런타임으로 빌드되어 POSIX 경로를 이해함)
     # -------------------------------------------------------------------------
     include(cmake/acquire_perl/mingw.cmake)
 
