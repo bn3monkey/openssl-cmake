@@ -61,10 +61,17 @@ if (NOT EXISTS "${_msys2_bash}")
 
     message(STATUS "[Perl/MSYS2] Extracting to ${_msys2_install_dir}...")
     file(MAKE_DIRECTORY "${_msys2_install_dir}")
-    file(ARCHIVE_EXTRACT
-        INPUT       "${_msys2_tarball}"
-        DESTINATION "${_msys2_install_dir}"
+    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
+    # (libarchive 기반이라 .tar.xz 압축 자동 감지)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E tar xf "${_msys2_tarball}"
+        WORKING_DIRECTORY "${_msys2_install_dir}"
+        RESULT_VARIABLE _extract_result
     )
+    if (NOT _extract_result EQUAL 0)
+        file(REMOVE "${_msys2_tarball}")
+        message(FATAL_ERROR "[Perl/MSYS2] tar.xz 압축 해제 실패 (exit=${_extract_result}): ${_msys2_tarball}")
+    endif()
     file(REMOVE "${_msys2_tarball}")
 
     if (NOT EXISTS "${_msys2_bash}")
@@ -95,8 +102,8 @@ if (NOT EXISTS "${_msys2_perl_exe}")
              && pacman --noconfirm --noprogressbar -Sy perl 2>&1"
         RESULT_VARIABLE _pacman_result
         TIMEOUT         300
-        ECHO_OUTPUT_VARIABLE
-        ECHO_ERROR_VARIABLE
+        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환.
+        # OUTPUT_VARIABLE 미지정이므로 출력은 콘솔로 그대로 전달됨(기존 동작 유지).
     )
 
     if (NOT _pacman_result EQUAL 0)

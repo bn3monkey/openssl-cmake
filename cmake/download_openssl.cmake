@@ -53,11 +53,23 @@ if (NOT EXISTS "${_openssl_src_dir}/Configure")
     endif()
 
     # 압축 해제: tarball 안의 최상위 디렉토리는 openssl-${OPENSSL_VERSION}/
+    #
+    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 에서만 사용 가능하나,
+    # 본 프로젝트의 최소 요구 버전은 3.15이므로 모든 버전에서 동작하는
+    # "cmake -E tar xzf"(execute_process)로 대체한다.
     message(STATUS "[OpenSSL] Extracting to ${CMAKE_CURRENT_SOURCE_DIR}/external/ ...")
-    file(ARCHIVE_EXTRACT
-        INPUT       "${_openssl_tarball}"
-        DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/external"
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E tar xzf "${_openssl_tarball}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external"
+        RESULT_VARIABLE _extract_result
     )
+    if (NOT _extract_result EQUAL 0)
+        file(REMOVE "${_openssl_tarball}")
+        message(FATAL_ERROR
+            "[OpenSSL] tarball 압축 해제 실패 (exit=${_extract_result}):\n"
+            "  ${_openssl_tarball}"
+        )
+    endif()
     file(REMOVE "${_openssl_tarball}")
 
     # openssl-3.6.1/ → openssl/ 로 이름 변경

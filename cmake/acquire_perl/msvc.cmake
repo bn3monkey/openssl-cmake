@@ -53,10 +53,17 @@ if (NOT _perl_exe_candidates)
 
     message(STATUS "[Perl] Extracting to ${_perl_install_dir}...")
     file(MAKE_DIRECTORY "${_perl_install_dir}")
-    file(ARCHIVE_EXTRACT
-        INPUT       "${_perl_zip}"
-        DESTINATION "${_perl_install_dir}"
+    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
+    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E tar xf "${_perl_zip}"
+        WORKING_DIRECTORY "${_perl_install_dir}"
+        RESULT_VARIABLE _extract_result
     )
+    if (NOT _extract_result EQUAL 0)
+        file(REMOVE "${_perl_zip}")
+        message(FATAL_ERROR "[Perl] zip 압축 해제 실패 (exit=${_extract_result}): ${_perl_zip}")
+    endif()
     file(REMOVE "${_perl_zip}")
 
     file(GLOB_RECURSE _perl_exe_candidates "${_perl_install_dir}/perl.exe")

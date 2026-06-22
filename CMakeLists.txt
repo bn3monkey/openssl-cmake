@@ -138,9 +138,9 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
         RESULT_VARIABLE   _configure_result
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
-        ECHO_OUTPUT_VARIABLE
-        ECHO_ERROR_VARIABLE
     )
+    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
@@ -345,9 +345,9 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         RESULT_VARIABLE   _configure_result
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
-        ECHO_OUTPUT_VARIABLE
-        ECHO_ERROR_VARIABLE
     )
+    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
@@ -506,9 +506,9 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
         RESULT_VARIABLE   _configure_result
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
-        ECHO_OUTPUT_VARIABLE
-        ECHO_ERROR_VARIABLE
     )
+    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
@@ -765,9 +765,9 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             RESULT_VARIABLE   _configure_result
             OUTPUT_VARIABLE   _configure_output
             ERROR_VARIABLE    _configure_error
-            ECHO_OUTPUT_VARIABLE
-            ECHO_ERROR_VARIABLE
         )
+        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+        message(STATUS "${_configure_output}")
     else()
         # Linux / macOS 호스트: perl 직접 실행
         set(ENV{ANDROID_NDK_ROOT} "${ANDROID_NDK_ROOT}")
@@ -784,9 +784,9 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             RESULT_VARIABLE   _configure_result
             OUTPUT_VARIABLE   _configure_output
             ERROR_VARIABLE    _configure_error
-            ECHO_OUTPUT_VARIABLE
-            ECHO_ERROR_VARIABLE
         )
+        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+        message(STATUS "${_configure_output}")
     endif()
 
     if (NOT _configure_result EQUAL 0)

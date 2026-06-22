@@ -61,10 +61,17 @@ if (NOT _jom_exe_candidates)
 
     message(STATUS "[JOM] Extracting to ${_jom_install_dir}...")
     file(MAKE_DIRECTORY "${_jom_install_dir}")
-    file(ARCHIVE_EXTRACT
-        INPUT       "${_jom_zip}"
-        DESTINATION "${_jom_install_dir}"
+    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
+    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E tar xf "${_jom_zip}"
+        WORKING_DIRECTORY "${_jom_install_dir}"
+        RESULT_VARIABLE _extract_result
     )
+    if (NOT _extract_result EQUAL 0)
+        file(REMOVE "${_jom_zip}")
+        message(FATAL_ERROR "[JOM] zip 압축 해제 실패 (exit=${_extract_result}): ${_jom_zip}")
+    endif()
     file(REMOVE "${_jom_zip}")
 
     file(GLOB _jom_exe_candidates "${_jom_install_dir}/jom.exe")

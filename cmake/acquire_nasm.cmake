@@ -64,10 +64,17 @@ if (NOT _nasm_exe_candidates)
 
     message(STATUS "[NASM] Extracting to ${_nasm_install_dir}...")
     file(MAKE_DIRECTORY "${_nasm_install_dir}")
-    file(ARCHIVE_EXTRACT
-        INPUT       "${_nasm_zip}"
-        DESTINATION "${_nasm_install_dir}"
+    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
+    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E tar xf "${_nasm_zip}"
+        WORKING_DIRECTORY "${_nasm_install_dir}"
+        RESULT_VARIABLE _extract_result
     )
+    if (NOT _extract_result EQUAL 0)
+        file(REMOVE "${_nasm_zip}")
+        message(FATAL_ERROR "[NASM] zip 압축 해제 실패 (exit=${_extract_result}): ${_nasm_zip}")
+    endif()
     file(REMOVE "${_nasm_zip}")
 
     file(GLOB_RECURSE _nasm_exe_candidates "${_nasm_install_dir}/nasm.exe")
