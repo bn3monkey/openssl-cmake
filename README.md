@@ -7,7 +7,7 @@ Android. Libraries are static (`no-shared`), so you don't have to ship OpenSSL D
 shared objects alongside your binary.
 
 - **OpenSSL version**: 3.6.1
-- **openssl-cmake version**: 0.2.0
+- **openssl-cmake version**: 1.1.0
 
 ---
 
@@ -19,7 +19,7 @@ include(FetchContent)
 FetchContent_Declare(
     openssl-cmake
     GIT_REPOSITORY https://github.com/bn3monkey/openssl-cmake.git
-    GIT_TAG        v0.2.0
+    GIT_TAG        v1.1.0
 )
 FetchContent_MakeAvailable(openssl-cmake)
 
@@ -61,7 +61,7 @@ re-configuring never touches the network again.
 
 ### Method 2 — Build from source
 
-Downloads the OpenSSL source and compiles it in place. This was the v0.1.0 behavior and it
+Downloads the OpenSSL source and compiles it in place. This was the v1.0.0 behavior and it
 still works exactly as before.
 
 ```cmake
@@ -169,7 +169,7 @@ llvm-readelf -l libyour_app.so | grep LOAD
 | Option | Default | Description |
 |---|---|---|
 | `OPENSSL_CMAKE_USE_PREBUILT` | `ON` | Set to `OFF` to build from source |
-| `OPENSSL_CMAKE_PREBUILT_TAG` | `v0.2.0` | Release tag to fetch prebuilts from |
+| `OPENSSL_CMAKE_PREBUILT_TAG` | `v1.1.0` | Release tag to fetch prebuilts from |
 | `OPENSSL_CMAKE_PREBUILT_URL` | (empty) | Override the asset base URL — for internal mirrors / air-gapped networks |
 
 ### Air-gapped networks
@@ -178,7 +178,7 @@ Copy the release assets (`*.tar.gz` and `prebuilt-manifest.cmake`) to an interna
 then:
 
 ```bash
-cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v0.2.0
+cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v1.1.0
 ```
 
 `file:///` URLs work too, so you can point at a local directory.
@@ -206,7 +206,7 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 
 ## Version history
 
-### v0.2.0
+### v1.1.0
 **Prebuilt binary distribution.**
 
 - GitHub Actions builds static libraries for 5 platforms on tag push and publishes them as
@@ -219,9 +219,12 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 - Android 16 KB page alignment link options propagated from the IMPORTED target (applies to
   source builds too)
 - `OPENSSL_CMAKE_PREBUILT_URL` override for air-gapped networks
-- The source build path is unchanged and still available via `OPENSSL_CMAKE_USE_PREBUILT=OFF`
+- Fixed: source builds now run in `<build-dir>/openssl-build/` instead of the build root.
+  Makefile generators write their own `Makefile` there and were clobbering OpenSSL's.
+- The source build path is otherwise unchanged and still available via
+  `OPENSSL_CMAKE_USE_PREBUILT=OFF`
 
-### v0.1.0
+### v1.0.0
 **Initial release. Source builds only.**
 
 - Downloads OpenSSL 3.6.1 source and builds it in place as static libraries
@@ -234,7 +237,7 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 
 ## Roadmap
 
-- **v0.3.0** — macOS support (Apple Silicon / Intel). There is currently no Darwin build
+- **v1.2.0** — macOS support (Apple Silicon / Intel). There is currently no Darwin build
   path, so source-build support has to come first.
 - Under consideration — Linux ARM64 prebuilts, a shared cross-project cache directory
 

@@ -8,7 +8,7 @@
 #
 # Required variables:
 #   OPENSSL_VERSION            - e.g. 3.6.1
-#   OPENSSL_CMAKE_PREBUILT_TAG - release tag, e.g. v0.2.0
+#   OPENSSL_CMAKE_PREBUILT_TAG - release tag, e.g. v1.1.0
 #   TARGET_OS / TARGET_ARCH / TARGET_COMPILER
 #
 # Optional variables:
