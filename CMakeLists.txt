@@ -68,7 +68,14 @@ message(STATUS "[OpenSSL] Mode : SOURCE BUILD")
 include(cmake/download_openssl.cmake)
 
 # openssl_BINARY_DIR : build output location (libcrypto.a, libssl.a, etc.)
-set(openssl_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+#
+# This MUST be a subdirectory, not CMAKE_CURRENT_BINARY_DIR itself.
+# OpenSSL's Configure writes a "Makefile" into its build directory, and the
+# Makefile-based generators ("Unix Makefiles", "MinGW Makefiles", ...) write
+# their own "Makefile" into CMAKE_CURRENT_BINARY_DIR. CMake's generate step
+# runs after our configure-time execute_process, so it would clobber OpenSSL's
+# Makefile and the build would fail with "No rule to make target 'build_libs'".
+set(openssl_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/openssl-build")
 
 message(STATUS "OpenSSL source dir : ${openssl_SOURCE_DIR}")
 message(STATUS "OpenSSL build dir  : ${openssl_BINARY_DIR}")

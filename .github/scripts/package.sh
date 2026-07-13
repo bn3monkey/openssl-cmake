@@ -42,10 +42,15 @@ fi
 
 : "${OPENSSL_VERSION:?OPENSSL_VERSION must be set}"
 
+# OpenSSL builds into a subdirectory of the CMake build dir, not into the build
+# dir itself — otherwise the Makefile generators clobber OpenSSL's Makefile.
+# Keep this in sync with openssl_BINARY_DIR in CMakeLists.txt.
+OSSL_BUILD="${BUILD_DIR}/openssl-build"
+
 SRC_INC="external/openssl/include/openssl"
-GEN_INC="${BUILD_DIR}/include/openssl"
-CRYPTO_LIB="${BUILD_DIR}/libcrypto.${LIB_EXT}"
-SSL_LIB="${BUILD_DIR}/libssl.${LIB_EXT}"
+GEN_INC="${OSSL_BUILD}/include/openssl"
+CRYPTO_LIB="${OSSL_BUILD}/libcrypto.${LIB_EXT}"
+SSL_LIB="${OSSL_BUILD}/libssl.${LIB_EXT}"
 
 for p in "$SRC_INC" "$GEN_INC" "$CRYPTO_LIB" "$SSL_LIB"; do
     if [[ ! -e "$p" ]]; then
@@ -70,7 +75,7 @@ cp "$SSL_LIB"    "${PKG}/lib/"
 
 # MSVC Debug: ship the PDBs so consumers can step into OpenSSL
 shopt -s nullglob
-for pdb in "${BUILD_DIR}"/libcrypto.pdb "${BUILD_DIR}"/libssl.pdb; do
+for pdb in "${OSSL_BUILD}"/libcrypto.pdb "${OSSL_BUILD}"/libssl.pdb; do
     cp "$pdb" "${PKG}/lib/"
 done
 shopt -u nullglob
