@@ -1,38 +1,38 @@
 # cmake/acquire_perl/android.cmake
-# Android 크로스컴파일 호스트용 Perl 탐색
+# Finds Perl for the Android cross-compilation host
 #
-# Android 크로스컴파일은 호스트(빌드 머신)에서 Configure를 실행하므로,
-# 호스트 시스템에 맞는 Perl을 획득한다.
+# Android cross-compilation runs Configure on the host (build machine),
+# so we acquire a Perl that matches the host system.
 #
-#   Windows  → mingw.cmake 와 동일하게 MSYS2 환경 사용
-#              (MSYS2 bash 내에서 perl을 실행해야 NDK의 .cmd 크로스컴파일러가
-#               확장자 없이 노출되어 OpenSSL Configure의 -f 체크를 통과함)
-#   Linux    → 시스템 Perl (find_program)
-#   macOS    → 시스템 Perl (find_program)
+#   Windows  -> Use the MSYS2 environment, same as mingw.cmake
+#               (perl must run inside MSYS2 bash so the NDK's .cmd cross-compilers
+#                are exposed without an extension and pass OpenSSL Configure's -f check)
+#   Linux    -> System Perl (find_program)
+#   macOS    -> System Perl (find_program)
 #
-# 출력 변수:
-#   PERL_EXECUTABLE - perl 실행 파일 전체 경로
-#   PERL_BIN_DIR    - perl 실행 파일이 위치한 디렉토리
+# Output variables:
+#   PERL_EXECUTABLE - Full path to the perl executable
+#   PERL_BIN_DIR    - Directory containing the perl executable
 
 if (CMAKE_HOST_WIN32)
     # -------------------------------------------------------------------------
-    # Windows 호스트: MSYS2 환경 사용 (bash + perl 포함)
+    # Windows host: use the MSYS2 environment (includes bash + perl)
     #
-    # 이유: NDK R25+ Windows에서 크로스컴파일러는 .cmd 래퍼로만 제공된다.
-    #       15-android.conf는 which("clang")으로 컴파일러를 탐색하는데,
-    #       MSYS2 bash 내에서 실행해야 POSIX 레이어가 .cmd를 확장자 없이 노출하여
-    #       which()가 컴파일러를 찾고 경로 정규식 매칭도 성공한다.
+    # Reason: on NDK R25+ for Windows, the cross-compilers ship only as .cmd wrappers.
+    #         15-android.conf looks the compiler up with which("clang"), so it must run
+    #         inside MSYS2 bash, where the POSIX layer exposes the .cmd files without an
+    #         extension, letting which() find the compiler and the path regex match too.
     #
-    # Configure와 make 모두 MSYS2 bash 안에서 실행한다:
-    #   - Configure: MSYS2 perl + cygpath으로 경로 변환
-    #   - make: NDK prebuilt make.exe를 MSYS2 bash 내에서 호출
-    #           (NDK make는 MSYS2 런타임으로 빌드되어 POSIX 경로를 이해함)
+    # Both Configure and make are run inside MSYS2 bash:
+    #   - Configure: MSYS2 perl + cygpath for path conversion
+    #   - make: invoke the NDK prebuilt make.exe from inside MSYS2 bash
+    #           (the NDK make is built against the MSYS2 runtime, so it understands POSIX paths)
     # -------------------------------------------------------------------------
     include(cmake/acquire_perl/mingw.cmake)
 
 else()
     # -------------------------------------------------------------------------
-    # Linux / macOS 호스트: 시스템에 설치된 Perl 탐색
+    # Linux / macOS host: find the Perl installed on the system
     # -------------------------------------------------------------------------
     find_program(PERL_EXECUTABLE
         NAMES perl perl5
@@ -41,8 +41,8 @@ else()
 
     if (NOT PERL_EXECUTABLE)
         message(FATAL_ERROR
-            "[Perl] Android 빌드에서 Perl을 찾을 수 없습니다.\n"
-            "호스트 시스템에 Perl을 설치하세요:\n"
+            "[Perl] Perl could not be found for the Android build.\n"
+            "Install Perl on the host system:\n"
             "  Linux : sudo apt install perl\n"
             "  macOS : brew install perl"
         )

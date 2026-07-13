@@ -1,14 +1,14 @@
 # cmake/acquire_perl/mingw.cmake
-# MSYS2를 다운로드하고 pacman으로 Perl을 설치 (MinGW 빌드 전용)
+# Downloads MSYS2 and installs Perl via pacman (MinGW builds only)
 #
-# 출력 변수:
-#   PERL_EXECUTABLE - perl.exe 전체 경로
-#   PERL_BIN_DIR    - perl.exe 가 있는 디렉토리
+# Output variables:
+#   PERL_EXECUTABLE - Full path to perl.exe
+#   PERL_BIN_DIR    - Directory containing perl.exe
 #
-# 동작 순서:
-#   1. tools/msys2/msys64/usr/bin/perl.exe 가 이미 있으면 스킵
-#   2. tools/msys2/msys64/usr/bin/bash.exe 가 없으면 MSYS2 base 다운로드 + 압축 해제
-#   3. bash -l 을 통해 pacman.conf SigLevel = Never 설정 후 perl 설치
+# Sequence of operations:
+#   1. Skip if tools/msys2/msys64/usr/bin/perl.exe already exists
+#   2. If tools/msys2/msys64/usr/bin/bash.exe is missing, download and extract the MSYS2 base
+#   3. Via bash -l, set SigLevel = Never in pacman.conf, then install perl
 
 set(_msys2_install_dir "${CMAKE_CURRENT_SOURCE_DIR}/tools/msys2")
 set(_msys2_root        "${_msys2_install_dir}/msys64")
@@ -18,7 +18,7 @@ set(_msys2_perl_exe    "${_msys2_root}/usr/bin/perl.exe")
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 단계 1: MSYS2 base 다운로드 + 압축 해제 (bash.exe 가 없을 때만)
+# Step 1: Download and extract the MSYS2 base (only when bash.exe is missing)
 # ─────────────────────────────────────────────────────────────────────────────
 if (NOT EXISTS "${_msys2_bash}")
     set(_msys2_tarball "${CMAKE_CURRENT_SOURCE_DIR}/tools/msys2-base.tar.xz")
@@ -53,16 +53,16 @@ if (NOT EXISTS "${_msys2_bash}")
     if (NOT _download_ok)
         message(FATAL_ERROR
             "[Perl/MSYS2] All download URLs failed.\n"
-            "수동으로 https://www.msys2.org 에서 MSYS2를 설치한 뒤\n"
-            "${_msys2_install_dir} 아래에 msys64 디렉토리를 두거나\n"
-            "pacman -S perl 을 직접 실행하세요."
+            "Install MSYS2 manually from https://www.msys2.org, then either\n"
+            "place the msys64 directory under ${_msys2_install_dir}\n"
+            "or run 'pacman -S perl' yourself."
         )
     endif()
 
     message(STATUS "[Perl/MSYS2] Extracting to ${_msys2_install_dir}...")
     file(MAKE_DIRECTORY "${_msys2_install_dir}")
-    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
-    # (libarchive 기반이라 .tar.xz 압축 자동 감지)
+    # file(ARCHIVE_EXTRACT) is CMake 3.18+ only -> use cmake -E tar for 3.15 compatibility
+    # (it is libarchive-based, so it auto-detects .tar.xz compression)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E tar xf "${_msys2_tarball}"
         WORKING_DIRECTORY "${_msys2_install_dir}"
@@ -70,7 +70,7 @@ if (NOT EXISTS "${_msys2_bash}")
     )
     if (NOT _extract_result EQUAL 0)
         file(REMOVE "${_msys2_tarball}")
-        message(FATAL_ERROR "[Perl/MSYS2] tar.xz 압축 해제 실패 (exit=${_extract_result}): ${_msys2_tarball}")
+        message(FATAL_ERROR "[Perl/MSYS2] tar.xz extraction failed (exit=${_extract_result}): ${_msys2_tarball}")
     endif()
     file(REMOVE "${_msys2_tarball}")
 
@@ -87,10 +87,10 @@ else()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 단계 2: pacman 으로 perl 설치 (perl.exe 가 없을 때만)
+# Step 2: Install perl via pacman (only when perl.exe is missing)
 #
-# 자동화 빌드에서 keyring 초기화 없이 pacman 을 실행하기 위해:
-#   - pacman.conf 의 SigLevel 을 Never 로 변경
+# To run pacman without initializing the keyring in an automated build:
+#   - Change SigLevel in pacman.conf to Never
 #   - pacman -Sy --noconfirm perl
 # ─────────────────────────────────────────────────────────────────────────────
 if (NOT EXISTS "${_msys2_perl_exe}")
@@ -102,14 +102,14 @@ if (NOT EXISTS "${_msys2_perl_exe}")
              && pacman --noconfirm --noprogressbar -Sy perl 2>&1"
         RESULT_VARIABLE _pacman_result
         TIMEOUT         300
-        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환.
-        # OUTPUT_VARIABLE 미지정이므로 출력은 콘솔로 그대로 전달됨(기존 동작 유지).
+        # ECHO_*_VARIABLE (3.18+) removed -> 3.15 compatibility.
+        # OUTPUT_VARIABLE is not specified, so output is passed straight to the console (preserves the previous behavior).
     )
 
     if (NOT _pacman_result EQUAL 0)
         message(FATAL_ERROR
-            "[Perl/MSYS2] pacman perl 설치 실패 (exit=${_pacman_result})\n"
-            "인터넷 연결을 확인하거나 MSYS2 셸에서 'pacman -S perl' 을 수동 실행하세요."
+            "[Perl/MSYS2] pacman perl installation failed (exit=${_pacman_result})\n"
+            "Check your internet connection, or run 'pacman -S perl' manually in an MSYS2 shell."
         )
     endif()
 
@@ -119,7 +119,7 @@ else()
 endif()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 출력 변수 설정
+# Set output variables
 # ─────────────────────────────────────────────────────────────────────────────
 if (NOT EXISTS "${_msys2_perl_exe}")
     message(FATAL_ERROR

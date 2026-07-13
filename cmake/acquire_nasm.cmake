@@ -1,14 +1,14 @@
 # cmake/acquire_nasm.cmake
-# NASM (Netwide Assembler) 다운로드 및 설치 (Windows 전용)
+# Downloads and installs NASM (Netwide Assembler) (Windows only)
 #
-# 설정 가능 변수:
-#   NASM_VERSION - NASM 버전 (기본값: 3.01)
+# Configurable variables:
+#   NASM_VERSION - NASM version (default: 3.01)
 #
-# 출력 변수:
-#   NASM_EXECUTABLE - nasm.exe 전체 경로
-#   NASM_BIN_DIR    - nasm.exe 가 있는 디렉토리
+# Output variables:
+#   NASM_EXECUTABLE - Full path to nasm.exe
+#   NASM_BIN_DIR    - Directory containing nasm.exe
 #
-# 다운로드 URL 우선순위:
+# Download URL priority:
 #   1. https://www.nasm.us/pub/nasm/releasebuilds/...
 #   2. https://www.nasm.dev/pub/nasm/releasebuilds/...
 #   3. https://vcpkg.github.io/assets/nasm/...
@@ -20,10 +20,10 @@ endif()
 set(_nasm_install_dir "${CMAKE_CURRENT_SOURCE_DIR}/tools/nasm")
 set(_nasm_zip         "${CMAKE_CURRENT_SOURCE_DIR}/tools/nasm.zip")
 
-# tools 디렉토리 생성
+# Create the tools directory
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 
-# 이미 설치된 경우 검색만 수행
+# If already installed, only perform the search
 file(GLOB_RECURSE _nasm_exe_candidates "${_nasm_install_dir}/nasm.exe")
 
 if (NOT _nasm_exe_candidates)
@@ -57,15 +57,15 @@ if (NOT _nasm_exe_candidates)
     if (NOT _download_ok)
         message(FATAL_ERROR
             "[NASM] All download URLs failed for NASM ${NASM_VERSION}.\n"
-            "수동으로 https://www.nasm.us 에서 nasm-${NASM_VERSION}-win64.zip 을 받아\n"
-            "${_nasm_install_dir} 에 압축 해제하거나, NASM_VERSION 변수를 확인하세요."
+            "Manually download nasm-${NASM_VERSION}-win64.zip from https://www.nasm.us and\n"
+            "extract it into ${_nasm_install_dir}, or check the NASM_VERSION variable."
         )
     endif()
 
     message(STATUS "[NASM] Extracting to ${_nasm_install_dir}...")
     file(MAKE_DIRECTORY "${_nasm_install_dir}")
-    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
-    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    # file(ARCHIVE_EXTRACT) is CMake 3.18+ only -> use cmake -E tar for 3.15 compatibility
+    # (it is libarchive-based, so it auto-detects zip from the extension)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E tar xf "${_nasm_zip}"
         WORKING_DIRECTORY "${_nasm_install_dir}"
@@ -73,7 +73,7 @@ if (NOT _nasm_exe_candidates)
     )
     if (NOT _extract_result EQUAL 0)
         file(REMOVE "${_nasm_zip}")
-        message(FATAL_ERROR "[NASM] zip 압축 해제 실패 (exit=${_extract_result}): ${_nasm_zip}")
+        message(FATAL_ERROR "[NASM] zip extraction failed (exit=${_extract_result}): ${_nasm_zip}")
     endif()
     file(REMOVE "${_nasm_zip}")
 

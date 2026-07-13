@@ -4,3 +4,5 @@ build/
 prj/build-*/
 tools/
 external/
+dist/
+pkg/

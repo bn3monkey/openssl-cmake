@@ -1,11 +1,11 @@
 # cmake/download_openssl.cmake
-# OpenSSL 소스 코드를 external/openssl 에 다운로드/압축해제한다.
+# Downloads and extracts the OpenSSL source code into external/openssl.
 #
-# 필요 변수:
-#   OPENSSL_VERSION - 다운로드할 OpenSSL 버전 (예: 3.6.1)
+# Required variables:
+#   OPENSSL_VERSION - the OpenSSL version to download (e.g. 3.6.1)
 #
-# 출력 변수:
-#   openssl_SOURCE_DIR - OpenSSL 소스 디렉토리 전체 경로
+# Output variables:
+#   openssl_SOURCE_DIR - full path to the OpenSSL source directory
 #                        → ${CMAKE_CURRENT_SOURCE_DIR}/external/openssl
 
 set(_openssl_src_dir  "${CMAKE_CURRENT_SOURCE_DIR}/external/openssl")
@@ -13,7 +13,7 @@ set(_openssl_tarball  "${CMAKE_CURRENT_SOURCE_DIR}/external/openssl-${OPENSSL_VE
 
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external")
 
-# Configure 스크립트 존재 여부로 이미 다운로드됐는지 판단
+# Use the presence of the Configure script to decide whether it has already been downloaded
 if (NOT EXISTS "${_openssl_src_dir}/Configure")
 
     set(_openssl_urls
@@ -45,18 +45,18 @@ if (NOT EXISTS "${_openssl_src_dir}/Configure")
 
     if (NOT _download_ok)
         message(FATAL_ERROR
-            "[OpenSSL] 모든 다운로드 URL 실패.\n"
-            "수동으로 OpenSSL ${OPENSSL_VERSION} 소스를\n"
+            "[OpenSSL] All download URLs failed.\n"
+            "Please manually extract the OpenSSL ${OPENSSL_VERSION} source\n"
             "  ${_openssl_src_dir}\n"
-            "에 압축 해제하세요."
+            "into the directory above."
         )
     endif()
 
-    # 압축 해제: tarball 안의 최상위 디렉토리는 openssl-${OPENSSL_VERSION}/
+    # Extraction: the top-level directory inside the tarball is openssl-${OPENSSL_VERSION}/
     #
-    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 에서만 사용 가능하나,
-    # 본 프로젝트의 최소 요구 버전은 3.15이므로 모든 버전에서 동작하는
-    # "cmake -E tar xzf"(execute_process)로 대체한다.
+    # file(ARCHIVE_EXTRACT) is only available in CMake 3.18+, but the minimum
+    # required version of this project is 3.15, so it is replaced with
+    # "cmake -E tar xzf" (execute_process), which works on all versions.
     message(STATUS "[OpenSSL] Extracting to ${CMAKE_CURRENT_SOURCE_DIR}/external/ ...")
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E tar xzf "${_openssl_tarball}"
@@ -66,13 +66,13 @@ if (NOT EXISTS "${_openssl_src_dir}/Configure")
     if (NOT _extract_result EQUAL 0)
         file(REMOVE "${_openssl_tarball}")
         message(FATAL_ERROR
-            "[OpenSSL] tarball 압축 해제 실패 (exit=${_extract_result}):\n"
+            "[OpenSSL] Failed to extract tarball (exit=${_extract_result}):\n"
             "  ${_openssl_tarball}"
         )
     endif()
     file(REMOVE "${_openssl_tarball}")
 
-    # openssl-3.6.1/ → openssl/ 로 이름 변경
+    # Rename openssl-3.6.1/ → openssl/
     set(_extracted_dir "${CMAKE_CURRENT_SOURCE_DIR}/external/openssl-${OPENSSL_VERSION}")
     if (EXISTS "${_extracted_dir}" AND NOT EXISTS "${_openssl_src_dir}/Configure")
         file(RENAME "${_extracted_dir}" "${_openssl_src_dir}")
@@ -80,8 +80,8 @@ if (NOT EXISTS "${_openssl_src_dir}/Configure")
 
     if (NOT EXISTS "${_openssl_src_dir}/Configure")
         message(FATAL_ERROR
-            "[OpenSSL] Configure 스크립트를 찾을 수 없습니다.\n"
-            "예상 경로: ${_openssl_src_dir}/Configure"
+            "[OpenSSL] Could not find the Configure script.\n"
+            "Expected path: ${_openssl_src_dir}/Configure"
         )
     endif()
 

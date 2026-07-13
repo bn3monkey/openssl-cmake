@@ -27,13 +27,47 @@ message(STATUS "Target Compiler : ${TARGET_COMPILER}")
 
 set(OPENSSL_VERSION 3.6.1)
 
+# openssl-cmake's own version. Used as the default prebuilt release tag.
+set(OPENSSL_CMAKE_VERSION 0.2.0)
+
+
+# ===========================================================================
+# PREBUILT vs SOURCE BUILD
+#
+# ON  : Download and use the prebuilt static libraries published on the
+#       GitHub Release (default). Build time ~0, tens of MB of disk.
+# OFF : Download the source and build it ourselves.
+#       Works on every architecture but is slow, and downloads the toolchain
+#       (Perl/NASM/MSYS2 etc.) into the build directory.
+#
+# Either way the final artifacts are the same: OpenSSL::SSL / OpenSSL::Crypto
+# ===========================================================================
+option(OPENSSL_CMAKE_USE_PREBUILT
+    "Download prebuilt OpenSSL static libraries instead of building from source"
+    ON)
+
+set(OPENSSL_CMAKE_PREBUILT_TAG "v${OPENSSL_CMAKE_VERSION}" CACHE STRING
+    "GitHub release tag to fetch prebuilt OpenSSL binaries from")
+
+set(OPENSSL_CMAKE_PREBUILT_URL "" CACHE STRING
+    "Override base URL for prebuilt assets (internal mirror / offline)")
+
+if (OPENSSL_CMAKE_USE_PREBUILT)
+
+    message(STATUS "[OpenSSL] Mode : PREBUILT (tag ${OPENSSL_CMAKE_PREBUILT_TAG})")
+    include(cmake/prebuilt/fetch_prebuilt.cmake)
+
+else()
+
+message(STATUS "[OpenSSL] Mode : SOURCE BUILD")
+
 # ===========================================================================
 # DOWNLOAD OPENSSL SOURCE
 # ===========================================================================
 # openssl_SOURCE_DIR → ${CMAKE_CURRENT_SOURCE_DIR}/external/openssl
 include(cmake/download_openssl.cmake)
 
-# openssl_BINARY_DIR : 빌드 출력 위치 (libcrypto.a, libssl.a 등)
+# openssl_BINARY_DIR : build output location (libcrypto.a, libssl.a, etc.)
 set(openssl_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 
 message(STATUS "OpenSSL source dir : ${openssl_SOURCE_DIR}")
@@ -46,32 +80,32 @@ message(STATUS "OpenSSL build dir  : ${openssl_BINARY_DIR}")
 if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
 
     # -----------------------------------------------------------------------
-    # Step 1. Perl 획득
+    # Step 1. Acquire Perl
     # -----------------------------------------------------------------------
     include(cmake/acquire_perl.cmake)
-    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+    # → sets PERL_EXECUTABLE, PERL_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 2. NASM 획득
+    # Step 2. Acquire NASM
     # -----------------------------------------------------------------------
     include(cmake/acquire_nasm.cmake)
-    # → NASM_EXECUTABLE, NASM_BIN_DIR 설정됨
+    # → sets NASM_EXECUTABLE, NASM_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 2-1. JOM 획득 (병렬 nmake 대체재)
+    # Step 2-1. Acquire JOM (parallel nmake replacement)
     # -----------------------------------------------------------------------
     include(cmake/acquire_jom.cmake)
-    # → JOM_EXECUTABLE, JOM_BIN_DIR 설정됨
+    # → sets JOM_EXECUTABLE, JOM_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 3. 현재 CMake 프로세스의 PATH에 Perl/NASM 경로 추가
-    #         (configure-time execute_process에서 사용)
+    # Step 3. Prepend the Perl/NASM paths to the current CMake process's PATH
+    #         (used by configure-time execute_process)
     # -----------------------------------------------------------------------
     set(ENV{PATH} "${PERL_BIN_DIR};${NASM_BIN_DIR};$ENV{PATH}")
     message(STATUS "[OpenSSL] PATH prepended with Perl and NASM bin dirs.")
 
     # -----------------------------------------------------------------------
-    # Step 4. 아키텍처별 OpenSSL configure 타겟 결정
+    # Step 4. Determine the OpenSSL configure target per architecture
     # -----------------------------------------------------------------------
     if ("${TARGET_ARCH}" STREQUAL "x86")
         # 32-bit x86
@@ -86,24 +120,24 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
         set(_openssl_configure_target "VC-WIN64-ARM")
 
     elseif ("${TARGET_ARCH}" STREQUAL "amd")
-        # AMD64 = x86_64와 동일 (OpenSSL은 별도 AMD 타겟을 제공하지 않음)
+        # AMD64 = same as x86_64 (OpenSSL does not provide a separate AMD target)
         set(_openssl_configure_target "VC-WIN64A")
 
     else()
         message(FATAL_ERROR
-            "[OpenSSL] MSVC 빌드에서 지원하지 않는 아키텍처: ${TARGET_ARCH}\n"
-            "지원 목록: x86, x64, arm64, amd"
+            "[OpenSSL] Unsupported architecture for the MSVC build: ${TARGET_ARCH}\n"
+            "Supported: x86, x64, arm64, amd"
         )
     endif()
     message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
 
     # -----------------------------------------------------------------------
-    # 빌드 타입 결정 (Debug 모드 시 디버그 심볼 포함)
+    # Determine the build type (include debug symbols in Debug mode)
     #
-    # --debug 플래그가 활성화되면 OpenSSL은 다음을 적용함:
-    #   - 컴파일러 플래그: /Zi (PDB 생성), /Od (최적화 Off), /RTC1 (런타임 검사)
-    #   - 디버그 CRT 링크: /MDd
-    #   - 출력: libcrypto.pdb, libssl.pdb (Visual Studio 심볼 추적 가능)
+    # When the --debug flag is enabled, OpenSSL applies the following:
+    #   - Compiler flags: /Zi (generate PDB), /Od (optimization off), /RTC1 (runtime checks)
+    #   - Debug CRT link: /MDd
+    #   - Output: libcrypto.pdb, libssl.pdb (symbols traceable in Visual Studio)
     # -----------------------------------------------------------------------
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
     if (_build_type_lower STREQUAL "debug")
@@ -115,11 +149,11 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
     endif()
 
     # -----------------------------------------------------------------------
-    # perl Configure 실행 (CMake configure-time, 매번 실행)
+    # Run perl Configure (at CMake configure-time, on every run)
     #
-    # Out-of-source 빌드:
-    #   소스  : openssl_SOURCE_DIR  (_deps/openssl-src)
-    #   결과물: openssl_BINARY_DIR  (_deps/openssl-build)
+    # Out-of-source build:
+    #   source : openssl_SOURCE_DIR  (_deps/openssl-src)
+    #   output : openssl_BINARY_DIR  (_deps/openssl-build)
     # -----------------------------------------------------------------------
     file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
 
@@ -131,58 +165,58 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
         COMMAND
             "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
             "${_openssl_configure_target}"
-            ${_openssl_debug_flags}    # Debug: --debug / Release: (없음)
-            no-shared                  # 정적 라이브러리만 빌드
-            no-makedepend              # 빌드 속도 향상
+            ${_openssl_debug_flags}    # Debug: --debug / Release: (none)
+            no-shared                  # build static libraries only
+            no-makedepend              # speeds up the build
         WORKING_DIRECTORY "${openssl_BINARY_DIR}"
         RESULT_VARIABLE   _configure_result
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
     )
-    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
     message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
-            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "[OpenSSL] perl Configure failed (exit=${_configure_result}):\n"
             "${_configure_error}"
         )
     endif()
 
-    message(STATUS "[OpenSSL] Configure 완료.")
+    message(STATUS "[OpenSSL] Configure done.")
 
     # -----------------------------------------------------------------------
-    # Step 5. jom 빌드 → OpenSSL::Crypto, OpenSSL::SSL 타겟 생성
+    # Step 5. jom build → create the OpenSSL::Crypto, OpenSSL::SSL targets
     #
-    # cmake -E env 로 Perl/NASM PATH를 주입한 뒤 jom을 직접 실행한다.
-    # jom은 nmake와 호환되며 병렬 빌드(-j)를 지원하여 빌드 속도가 빠름.
+    # Inject the Perl/NASM PATH with `cmake -E env`, then run jom directly.
+    # jom is nmake-compatible and supports parallel builds (-j), so it is fast.
     #
-    # ※ PATH에 세미콜론(;)을 포함시키는 방법:
-    #   CMake COMMAND 리스트에서 ';'는 인자 구분자로 해석되므로 직접 쓸 수 없음.
-    #   $<SEMICOLON> 제너레이터 표현식을 사용하면:
-    #     - configure 시점: CMake 리스트 구분자로 파싱되지 않음
-    #     - generate  시점: 실제 ';' 문자로 확장됨
+    # ※ How to embed a semicolon (;) in PATH:
+    #   In a CMake COMMAND list ';' is interpreted as an argument separator, so it
+    #   cannot be written directly. Using the $<SEMICOLON> generator expression:
+    #     - at configure time: it is not parsed as a CMake list separator
+    #     - at generate  time: it expands to a literal ';' character
     # -----------------------------------------------------------------------
-    # out-of-source 빌드이므로 라이브러리와 생성 헤더가 openssl_BINARY_DIR에 위치
+    # This is an out-of-source build, so the libraries and generated headers live in openssl_BINARY_DIR
     set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.lib")
     set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.lib")
-    # include: 빌드 디렉토리(opensslconf.h 등 생성 헤더) + 소스 디렉토리(원본 헤더)
+    # include: build directory (generated headers such as opensslconf.h) + source directory (original headers)
     set(_openssl_include
         "${openssl_BINARY_DIR}/include"
         "${openssl_SOURCE_DIR}/include"
     )
 
-    # 병렬 job 수: 프로세서 수만큼 병렬 빌드
+    # Number of parallel jobs: build in parallel with as many jobs as there are processors
     include(ProcessorCount)
     ProcessorCount(_cpu_count)
     if (_cpu_count EQUAL 0)
-        set(_cpu_count 4)   # 감지 실패 시 기본값
+        set(_cpu_count 4)   # default when detection fails
     endif()
     message(STATUS "[OpenSSL] jom parallel jobs : ${_cpu_count}")
 
-    # jom을 직접 실행하는 custom command
-    # cmake -E env "PATH=<perl>;<nasm>;<기존PATH>" jom -j<N>
-    # $<SEMICOLON>이 generate-time에 ';'로 확장되어 PATH 구분자로 동작함
+    # Custom command that runs jom directly
+    # cmake -E env "PATH=<perl>;<nasm>;<existing PATH>" jom -j<N>
+    # $<SEMICOLON> expands to ';' at generate-time and acts as the PATH separator
     add_custom_command(
         OUTPUT
             "${_openssl_crypto_lib}"
@@ -193,11 +227,11 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
             "${JOM_EXECUTABLE}" -j${_cpu_count} build_libs
         WORKING_DIRECTORY "${openssl_BINARY_DIR}"
         COMMENT "[OpenSSL] Building OpenSSL with jom -j${_cpu_count} build_libs..."
-        USES_TERMINAL   # Ninja console pool → 터미널 직접 연결 → 실시간 출력
+        USES_TERMINAL   # Ninja console pool → attached directly to the terminal → real-time output
         VERBATIM
     )
 
-    # 빌드 타겟: ALL에 포함시켜 항상 빌드되도록 함
+    # Build target: added to ALL so it is always built
     add_custom_target(openssl_jom_build ALL
         DEPENDS
             "${_openssl_crypto_lib}"
@@ -205,8 +239,8 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
         COMMENT "[OpenSSL] Ensuring OpenSSL libraries are built."
     )
 
-    # Debug 빌드 시 PDB(심볼) 파일 경로 설정
-    # OpenSSL --debug 빌드가 생성하는 PDB: Visual Studio에서 Step-Into 디버깅 가능
+    # Set the PDB (symbol) file paths for Debug builds
+    # PDBs produced by an OpenSSL --debug build: allows Step-Into debugging in Visual Studio
     if (_build_type_lower STREQUAL "debug")
         set(_openssl_crypto_pdb "${openssl_BINARY_DIR}/libcrypto.pdb")
         set(_openssl_ssl_pdb    "${openssl_BINARY_DIR}/libssl.pdb")
@@ -215,7 +249,7 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
         set(_openssl_ssl_pdb    "")
     endif()
 
-    # IMPORTED 정적 라이브러리 타겟 생성
+    # Create the IMPORTED static library targets
     add_library(openssl_crypto STATIC IMPORTED GLOBAL)
     set_target_properties(openssl_crypto PROPERTIES
         IMPORTED_LOCATION             "${_openssl_crypto_lib}"
@@ -242,7 +276,7 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
     endif()
     add_dependencies(openssl_ssl openssl_jom_build)
 
-    # 표준 네임스페이스 별칭 (INTERFACE IMPORTED로 래핑)
+    # Standard namespaced aliases (wrapped as INTERFACE IMPORTED)
     add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
     set_target_properties(OpenSSL::Crypto PROPERTIES
         INTERFACE_LINK_LIBRARIES      "openssl_crypto"
@@ -264,38 +298,38 @@ if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
 
 
 # ===========================================================================
-# BUILD: Windows + MinGW (Qt 번들 MinGW)
+# BUILD: Windows + MinGW (MinGW bundled with Qt)
 # ===========================================================================
 elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "mingw")
 
     # -----------------------------------------------------------------------
-    # Step 1. Perl 획득 (Strawberry Perl - MSVC와 동일하게 재사용)
+    # Step 1. Acquire Perl (Strawberry Perl - reused just like for MSVC)
     # -----------------------------------------------------------------------
     include(cmake/acquire_perl.cmake)
-    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+    # → sets PERL_EXECUTABLE, PERL_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 2. NASM 획득
+    # Step 2. Acquire NASM
     # -----------------------------------------------------------------------
     include(cmake/acquire_nasm.cmake)
-    # → NASM_EXECUTABLE, NASM_BIN_DIR 설정됨
+    # → sets NASM_EXECUTABLE, NASM_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 3. Qt MinGW bin 디렉토리 확인
+    # Step 3. Locate the Qt MinGW bin directory
     #         CMAKE_C_COMPILER → .../mingwXXXX_64/bin/gcc.exe
     # -----------------------------------------------------------------------
     get_filename_component(_mingw_bin_dir "${CMAKE_C_COMPILER}" DIRECTORY)
     message(STATUS "[OpenSSL] MinGW bin dir : ${_mingw_bin_dir}")
 
     # -----------------------------------------------------------------------
-    # Step 4. 현재 CMake 프로세스의 PATH에 Perl/NASM/MinGW 경로 추가
-    #         (configure-time execute_process에서 사용)
+    # Step 4. Prepend the Perl/NASM/MinGW paths to the current CMake process's PATH
+    #         (used by configure-time execute_process)
     # -----------------------------------------------------------------------
     set(ENV{PATH} "${PERL_BIN_DIR};${NASM_BIN_DIR};${_mingw_bin_dir};$ENV{PATH}")
     message(STATUS "[OpenSSL] PATH prepended with Perl, NASM, and MinGW bin dirs.")
 
     # -----------------------------------------------------------------------
-    # Step 5. 아키텍처별 OpenSSL configure 타겟 결정
+    # Step 5. Determine the OpenSSL configure target per architecture
     # -----------------------------------------------------------------------
     if ("${TARGET_ARCH}" STREQUAL "x64")
         set(_openssl_configure_target "mingw64")
@@ -303,14 +337,14 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         set(_openssl_configure_target "mingw")
     else()
         message(FATAL_ERROR
-            "[OpenSSL] MinGW 빌드에서 지원하지 않는 아키텍처: ${TARGET_ARCH}\n"
-            "지원 목록: x86, x64"
+            "[OpenSSL] Unsupported architecture for the MinGW build: ${TARGET_ARCH}\n"
+            "Supported: x86, x64"
         )
     endif()
     message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
 
     # -----------------------------------------------------------------------
-    # 빌드 타입 결정
+    # Determine the build type
     # -----------------------------------------------------------------------
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
     if (_build_type_lower STREQUAL "debug")
@@ -322,7 +356,7 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
     endif()
 
     # -----------------------------------------------------------------------
-    # perl Configure 실행 (CMake configure-time, 매번 실행)
+    # Run perl Configure (at CMake configure-time, on every run)
     # -----------------------------------------------------------------------
     file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
 
@@ -334,11 +368,11 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         COMMAND
             "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
             "${_openssl_configure_target}"
-            ${_openssl_debug_flags}    # Debug: --debug / Release: (없음)
-            no-shared                  # 정적 라이브러리만 빌드
-            no-makedepend              # 빌드 속도 향상
-            # SIO_UDP_NETRESET: Qt MinGW 8.1 번들의 구버전 winsock2 헤더에 미정의
-            # (Windows 10 SDK 10.0.19041+ 에서 추가된 상수)
+            ${_openssl_debug_flags}    # Debug: --debug / Release: (none)
+            no-shared                  # build static libraries only
+            no-makedepend              # speeds up the build
+            # SIO_UDP_NETRESET: undefined in the old winsock2 headers bundled with Qt MinGW 8.1
+            # (a constant added in Windows 10 SDK 10.0.19041+)
             # IOC_IN(0x80000000) | IOC_VENDOR(0x18000000) | 26(0x1A) = 0x9800001A
             -DSIO_UDP_NETRESET=0x9800001A
         WORKING_DIRECTORY "${openssl_BINARY_DIR}"
@@ -346,22 +380,22 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
     )
-    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
     message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
-            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "[OpenSSL] perl Configure failed (exit=${_configure_result}):\n"
             "${_configure_error}"
         )
     endif()
 
-    message(STATUS "[OpenSSL] Configure 완료.")
+    message(STATUS "[OpenSSL] Configure done.")
 
     # -----------------------------------------------------------------------
-    # Step 6. mingw32-make 빌드 → OpenSSL::Crypto, OpenSSL::SSL 타겟 생성
+    # Step 6. mingw32-make build → create the OpenSSL::Crypto, OpenSSL::SSL targets
     #
-    # MinGW 정적 라이브러리 출력: libcrypto.a, libssl.a
+    # MinGW static library output: libcrypto.a, libssl.a
     # -----------------------------------------------------------------------
     set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
     set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
@@ -370,16 +404,16 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         "${openssl_SOURCE_DIR}/include"
     )
 
-    # mingw32-make는 CMAKE_C_COMPILER와 같은 bin 디렉토리에 위치
+    # mingw32-make lives in the same bin directory as CMAKE_C_COMPILER
     find_program(_mingw32_make_exe mingw32-make
         HINTS "${_mingw_bin_dir}"
         NO_DEFAULT_PATH
     )
     if (NOT _mingw32_make_exe)
         message(FATAL_ERROR
-            "[OpenSSL] mingw32-make를 찾을 수 없습니다.\n"
-            "Qt MinGW 툴체인이 올바르게 설정되었는지 확인하세요.\n"
-            "탐색 경로: ${_mingw_bin_dir}"
+            "[OpenSSL] Could not find mingw32-make.\n"
+            "Check that the Qt MinGW toolchain is set up correctly.\n"
+            "Searched path: ${_mingw_bin_dir}"
         )
     endif()
     message(STATUS "[OpenSSL] mingw32-make : ${_mingw32_make_exe}")
@@ -411,7 +445,7 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
         COMMENT "[OpenSSL] Ensuring OpenSSL libraries are built."
     )
 
-    # IMPORTED 정적 라이브러리 타겟 생성
+    # Create the IMPORTED static library targets
     add_library(openssl_crypto STATIC IMPORTED GLOBAL)
     set_target_properties(openssl_crypto PROPERTIES
         IMPORTED_LOCATION             "${_openssl_crypto_lib}"
@@ -428,7 +462,7 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
     )
     add_dependencies(openssl_ssl openssl_make_build)
 
-    # 표준 네임스페이스 별칭
+    # Standard namespaced aliases
     add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
     set_target_properties(OpenSSL::Crypto PROPERTIES
         INTERFACE_LINK_LIBRARIES      "openssl_crypto"
@@ -450,13 +484,13 @@ elseif ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "min
 elseif ("${TARGET_OS}" STREQUAL "Linux")
 
     # -----------------------------------------------------------------------
-    # Step 1. Perl 획득 (시스템 Perl 사용)
+    # Step 1. Acquire Perl (use the system Perl)
     # -----------------------------------------------------------------------
     include(cmake/acquire_perl.cmake)
-    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+    # → sets PERL_EXECUTABLE, PERL_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 2. 아키텍처별 OpenSSL configure 타겟 결정
+    # Step 2. Determine the OpenSSL configure target per architecture
     # -----------------------------------------------------------------------
     if ("${TARGET_ARCH}" STREQUAL "x64")
         set(_openssl_configure_target "linux-x86_64")
@@ -468,14 +502,14 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
         set(_openssl_configure_target "linux-armv4")
     else()
         message(FATAL_ERROR
-            "[OpenSSL] Linux 빌드에서 지원하지 않는 아키텍처: ${TARGET_ARCH}\n"
-            "지원 목록: x86, x64, arm64, arm"
+            "[OpenSSL] Unsupported architecture for the Linux build: ${TARGET_ARCH}\n"
+            "Supported: x86, x64, arm64, arm"
         )
     endif()
     message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
 
     # -----------------------------------------------------------------------
-    # 빌드 타입 결정
+    # Determine the build type
     # -----------------------------------------------------------------------
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
     if (_build_type_lower STREQUAL "debug")
@@ -487,7 +521,7 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     endif()
 
     # -----------------------------------------------------------------------
-    # Step 3. perl Configure 실행 (CMake configure-time)
+    # Step 3. Run perl Configure (at CMake configure-time)
     # -----------------------------------------------------------------------
     file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
 
@@ -500,27 +534,27 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
             "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
             "${_openssl_configure_target}"
             ${_openssl_debug_flags}
-            no-shared       # 정적 라이브러리만 빌드
-            no-makedepend   # 빌드 속도 향상
+            no-shared       # build static libraries only
+            no-makedepend   # speeds up the build
         WORKING_DIRECTORY "${openssl_BINARY_DIR}"
         RESULT_VARIABLE   _configure_result
         OUTPUT_VARIABLE   _configure_output
         ERROR_VARIABLE    _configure_error
     )
-    # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+    # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
     message(STATUS "${_configure_output}")
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
-            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "[OpenSSL] perl Configure failed (exit=${_configure_result}):\n"
             "${_configure_error}"
         )
     endif()
 
-    message(STATUS "[OpenSSL] Configure 완료.")
+    message(STATUS "[OpenSSL] Configure done.")
 
     # -----------------------------------------------------------------------
-    # Step 4. make 빌드 → libcrypto.a, libssl.a 생성
+    # Step 4. make build → produces libcrypto.a, libssl.a
     # -----------------------------------------------------------------------
     set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
     set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
@@ -535,8 +569,8 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     )
     if (NOT _linux_make_exe)
         message(FATAL_ERROR
-            "[OpenSSL] make를 찾을 수 없습니다.\n"
-            "패키지 매니저로 설치하세요:\n"
+            "[OpenSSL] Could not find make.\n"
+            "Install it with your package manager:\n"
             "  Ubuntu/Debian : sudo apt install make\n"
             "  Fedora/RHEL   : sudo dnf install make\n"
             "  Arch          : sudo pacman -S make"
@@ -572,7 +606,7 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     )
 
     # -----------------------------------------------------------------------
-    # IMPORTED 정적 라이브러리 타겟 생성
+    # Create the IMPORTED static library targets
     # -----------------------------------------------------------------------
     add_library(openssl_crypto STATIC IMPORTED GLOBAL)
     set_target_properties(openssl_crypto PROPERTIES
@@ -590,7 +624,7 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     )
     add_dependencies(openssl_ssl openssl_make_build)
 
-    # 표준 네임스페이스 별칭
+    # Standard namespaced aliases
     add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
     set_target_properties(OpenSSL::Crypto PROPERTIES
         INTERFACE_LINK_LIBRARIES      "openssl_crypto"
@@ -607,20 +641,20 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
 
 # ===========================================================================
-# BUILD: Android  (NDK clang 크로스컴파일)
+# BUILD: Android  (NDK clang cross-compile)
 # ===========================================================================
 elseif ("${TARGET_OS}" STREQUAL "Android")
 
     # -----------------------------------------------------------------------
-    # Step 1. Perl 획득 (호스트에서 실행 - 크로스컴파일 빌드 머신용)
+    # Step 1. Acquire Perl (runs on the host - for the cross-compiling build machine)
     # -----------------------------------------------------------------------
     include(cmake/acquire_perl.cmake)
-    # → PERL_EXECUTABLE, PERL_BIN_DIR 설정됨
+    # → sets PERL_EXECUTABLE, PERL_BIN_DIR
 
     # -----------------------------------------------------------------------
-    # Step 2. ANDROID_NDK_ROOT 결정
-    #   우선순위: CMake 변수 > 환경변수 ANDROID_NDK_ROOT > ANDROID_NDK_HOME
-    #   Android Studio는 CMAKE_ANDROID_NDK를 자동으로 설정해준다.
+    # Step 2. Determine ANDROID_NDK_ROOT
+    #   Priority: CMake variable > ANDROID_NDK_ROOT env var > ANDROID_NDK_HOME
+    #   Android Studio sets CMAKE_ANDROID_NDK automatically.
     # -----------------------------------------------------------------------
     if (NOT ANDROID_NDK_ROOT)
         if (DEFINED CMAKE_ANDROID_NDK AND CMAKE_ANDROID_NDK)
@@ -631,19 +665,19 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             set(ANDROID_NDK_ROOT "$ENV{ANDROID_NDK_HOME}")
         else()
             message(FATAL_ERROR
-                "[OpenSSL] ANDROID_NDK_ROOT를 찾을 수 없습니다.\n"
-                "다음 중 하나를 설정하세요:\n"
-                "  - CMAKE_ANDROID_NDK (CMake 변수, Android Studio 자동 설정)\n"
-                "  - ANDROID_NDK_ROOT  (환경변수)\n"
-                "  - ANDROID_NDK_HOME  (환경변수)"
+                "[OpenSSL] Could not find ANDROID_NDK_ROOT.\n"
+                "Set one of the following:\n"
+                "  - CMAKE_ANDROID_NDK (CMake variable, set automatically by Android Studio)\n"
+                "  - ANDROID_NDK_ROOT  (environment variable)\n"
+                "  - ANDROID_NDK_HOME  (environment variable)"
             )
         endif()
     endif()
     message(STATUS "[OpenSSL] ANDROID_NDK_ROOT : ${ANDROID_NDK_ROOT}")
 
     # -----------------------------------------------------------------------
-    # Step 3. NDK LLVM 툴체인 bin 디렉토리 결정
-    #   경로: <ndk>/toolchains/llvm/prebuilt/<host-tag>/bin
+    # Step 3. Determine the NDK LLVM toolchain bin directory
+    #   Path: <ndk>/toolchains/llvm/prebuilt/<host-tag>/bin
     #   host-tag: linux-x86_64 / darwin-x86_64|arm64 / windows-x86_64
     # -----------------------------------------------------------------------
     if (CMAKE_HOST_WIN32)
@@ -661,16 +695,16 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     set(_ndk_llvm_bin "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/${_ndk_host_tag}/bin")
     if (NOT EXISTS "${_ndk_llvm_bin}")
         message(FATAL_ERROR
-            "[OpenSSL] NDK LLVM bin 디렉토리를 찾을 수 없습니다:\n"
+            "[OpenSSL] Could not find the NDK LLVM bin directory:\n"
             "  ${_ndk_llvm_bin}\n"
-            "NDK 경로와 버전을 확인하세요."
+            "Check the NDK path and version."
         )
     endif()
     message(STATUS "[OpenSSL] NDK LLVM bin : ${_ndk_llvm_bin}")
 
     # -----------------------------------------------------------------------
-    # Step 4. 아키텍처별 OpenSSL configure 타겟 결정
-    #   ANDROID_ABI (Gradle abiFilters) → OpenSSL Configure 타겟명
+    # Step 4. Determine the OpenSSL configure target per architecture
+    #   ANDROID_ABI (Gradle abiFilters) → OpenSSL Configure target name
     # -----------------------------------------------------------------------
     if ("${ANDROID_ABI}" STREQUAL "arm64-v8a")
         set(_openssl_configure_target "android-arm64")
@@ -682,16 +716,16 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
         set(_openssl_configure_target "android-x86")
     else()
         message(FATAL_ERROR
-            "[OpenSSL] 지원하지 않는 Android ABI: ${ANDROID_ABI}\n"
-            "지원 목록: arm64-v8a, armeabi-v7a, x86_64, x86"
+            "[OpenSSL] Unsupported Android ABI: ${ANDROID_ABI}\n"
+            "Supported: arm64-v8a, armeabi-v7a, x86_64, x86"
         )
     endif()
     message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
 
     # -----------------------------------------------------------------------
-    # Step 5. Android API 레벨 결정
-    #   ANDROID_PLATFORM = "android-35" 형식 → 숫자만 추출
-    #   또는 ANDROID_NATIVE_API_LEVEL (숫자 그대로)
+    # Step 5. Determine the Android API level
+    #   ANDROID_PLATFORM has the form "android-35" → extract just the number
+    #   Or ANDROID_NATIVE_API_LEVEL (already a number)
     # -----------------------------------------------------------------------
     if (ANDROID_PLATFORM)
         string(REGEX REPLACE "^android-" "" _api_level "${ANDROID_PLATFORM}")
@@ -699,12 +733,12 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
         set(_api_level "${ANDROID_NATIVE_API_LEVEL}")
     else()
         set(_api_level "21")
-        message(WARNING "[OpenSSL] Android API 레벨을 감지할 수 없어 기본값 21을 사용합니다.")
+        message(WARNING "[OpenSSL] Could not detect the Android API level; falling back to the default of 21.")
     endif()
     message(STATUS "[OpenSSL] Android API level : ${_api_level}")
 
     # -----------------------------------------------------------------------
-    # 빌드 타입 결정
+    # Determine the build type
     # -----------------------------------------------------------------------
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
     if (_build_type_lower STREQUAL "debug")
@@ -716,18 +750,19 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     endif()
 
     # -----------------------------------------------------------------------
-    # Step 6. perl Configure 실행 (CMake configure-time)
+    # Step 6. Run perl Configure (at CMake configure-time)
     #
-    # OpenSSL Configure가 NDK를 찾기 위해 필요한 환경변수:
-    #   ANDROID_NDK_ROOT - NDK 루트 경로
-    #   PATH             - NDK clang, llvm-ar 등이 포함된 bin
+    # Environment variables OpenSSL Configure needs in order to find the NDK:
+    #   ANDROID_NDK_ROOT - the NDK root path
+    #   PATH             - the bin dir containing NDK clang, llvm-ar, etc.
     #
-    # Windows 호스트 - MSYS2 bash 경유 필수:
-    #   OpenSSL 15-android.conf가 Perl의 -f 연산자로 풀 경로 체크:
+    # Windows host - going through MSYS2 bash is mandatory:
+    #   OpenSSL's 15-android.conf checks full paths with Perl's -f operator:
     #     -f "$ndk/toolchains/.../bin/aarch64-linux-android-clang"
-    #   NDK R25+ Windows는 .cmd 파일만 있어 네이티브 Perl에서는 -f 실패.
-    #   MSYS2 bash 안에서 실행하면 POSIX 레이어가 .cmd를 확장자 없이 노출.
-    #   → cygpath으로 경로를 Unix 형식으로 변환한 뒤 bash를 경유해 실행.
+    #   On Windows, NDK R25+ only ships .cmd files, so -f fails under native Perl.
+    #   When run inside MSYS2 bash, the POSIX layer exposes the .cmd files without
+    #   their extension.
+    #   → Convert the paths to Unix form with cygpath, then run via bash.
     # -----------------------------------------------------------------------
     file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
 
@@ -736,19 +771,19 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     message(STATUS "[OpenSSL]   build  : ${openssl_BINARY_DIR}")
 
     if (CMAKE_HOST_WIN32)
-        # acquire_perl/mingw.cmake 가 _msys2_bash 설정 (_msys2_root/usr/bin/bash.exe)
+        # acquire_perl/mingw.cmake sets _msys2_bash (_msys2_root/usr/bin/bash.exe)
         if (NOT _msys2_bash OR NOT EXISTS "${_msys2_bash}")
             message(FATAL_ERROR
-                "[OpenSSL] MSYS2 bash를 찾을 수 없습니다: ${_msys2_bash}\n"
-                "Perl 획득 단계(MSYS2)가 정상적으로 완료되었는지 확인하세요."
+                "[OpenSSL] Could not find MSYS2 bash: ${_msys2_bash}\n"
+                "Check that the Perl acquisition step (MSYS2) completed successfully."
             )
         endif()
 
-        # ANDROID_NDK_ROOT / PATH 는 MSYS2 bash가 NDK clang을 탐색해야 하므로 cygpath 변환
-        # cd / perl 경로는 Windows 경로 그대로 사용:
-        #   → perl이 소스 경로를 Windows 형식(D:/...)으로 Makefile에 기록
-        #   → NDK make.exe가 configdata.pm 의존성 파일을 올바르게 찾을 수 있음
-        # bash -l : 로그인 셸 → MSYS2 표준 도구 PATH 포함
+        # ANDROID_NDK_ROOT / PATH go through cygpath because MSYS2 bash has to locate NDK clang
+        # The cd / perl paths stay in Windows form:
+        #   → perl records the source path in the Makefile in Windows form (D:/...)
+        #   → the NDK make.exe can then correctly find the configdata.pm dependency file
+        # bash -l : login shell → includes the standard MSYS2 tool PATH
         string(CONCAT _bash_configure_cmd
             "set -e"
             " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
@@ -766,10 +801,10 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             OUTPUT_VARIABLE   _configure_output
             ERROR_VARIABLE    _configure_error
         )
-        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+        # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
         message(STATUS "${_configure_output}")
     else()
-        # Linux / macOS 호스트: perl 직접 실행
+        # Linux / macOS host: run perl directly
         set(ENV{ANDROID_NDK_ROOT} "${ANDROID_NDK_ROOT}")
         set(ENV{PATH} "${_ndk_llvm_bin}:${PERL_BIN_DIR}:$ENV{PATH}")
         execute_process(
@@ -778,28 +813,28 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
                 "${_openssl_configure_target}"
                 -D__ANDROID_API__=${_api_level}
                 ${_openssl_debug_flags}
-                no-shared       # 정적 라이브러리만 빌드
-                no-makedepend   # 빌드 속도 향상
+                no-shared       # build static libraries only
+                no-makedepend   # speeds up the build
             WORKING_DIRECTORY "${openssl_BINARY_DIR}"
             RESULT_VARIABLE   _configure_result
             OUTPUT_VARIABLE   _configure_output
             ERROR_VARIABLE    _configure_error
         )
-        # ECHO_*_VARIABLE(3.18+) 제거 → 3.15 호환. 캡처된 출력을 완료 후 표시.
+        # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
         message(STATUS "${_configure_output}")
     endif()
 
     if (NOT _configure_result EQUAL 0)
         message(FATAL_ERROR
-            "[OpenSSL] perl Configure 실패 (exit=${_configure_result}):\n"
+            "[OpenSSL] perl Configure failed (exit=${_configure_result}):\n"
             "${_configure_error}"
         )
     endif()
 
-    message(STATUS "[OpenSSL] Configure 완료.")
+    message(STATUS "[OpenSSL] Configure done.")
 
     # -----------------------------------------------------------------------
-    # Step 7. make 빌드 → libcrypto.a, libssl.a 생성
+    # Step 7. make build → produces libcrypto.a, libssl.a
     # -----------------------------------------------------------------------
     set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
     set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
@@ -815,8 +850,8 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     endif()
     message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
 
-    # NDK 내장 make 결정: 호스트 OS별 실행 파일명만 다름
-    #   _ndk_host_tag 는 Step 3에서 이미 결정됨
+    # Determine the make bundled with the NDK: only the executable name differs per host OS
+    #   _ndk_host_tag was already determined in Step 3
     #   Windows : <ndk>/prebuilt/windows-x86_64/bin/make.exe
     #   Linux   : <ndk>/prebuilt/linux-x86_64/bin/make
     #   macOS   : <ndk>/prebuilt/darwin-x86_64|arm64/bin/make
@@ -827,15 +862,15 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     endif()
     if (NOT EXISTS "${_ndk_make_exe}")
         message(FATAL_ERROR
-            "[OpenSSL] NDK 내장 make를 찾을 수 없습니다:\n"
+            "[OpenSSL] Could not find the make bundled with the NDK:\n"
             "  ${_ndk_make_exe}\n"
-            "NDK 경로와 버전을 확인하세요."
+            "Check the NDK path and version."
         )
     endif()
     message(STATUS "[OpenSSL] NDK make : ${_ndk_make_exe}")
 
     if (CMAKE_HOST_WIN32)
-        # Windows 호스트: MSYS2 bash를 경유, NDK make.exe를 cygpath로 변환해 직접 호출
+        # Windows host: go through MSYS2 bash and invoke the NDK make.exe directly via a cygpath-converted path
         string(CONCAT _bash_make_cmd
             "set -e"
             " && export ANDROID_NDK_ROOT=$(cygpath -u '${ANDROID_NDK_ROOT}')"
@@ -854,7 +889,7 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
             VERBATIM
         )
     else()
-        # Linux / macOS 호스트: NDK 내장 make 직접 실행
+        # Linux / macOS host: run the NDK's bundled make directly
         add_custom_command(
             OUTPUT
                 "${_openssl_crypto_lib}"
@@ -878,8 +913,8 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     )
 
     # -----------------------------------------------------------------------
-    # IMPORTED 정적 라이브러리 타겟 생성
-    # Android에서는 ws2_32/crypt32 같은 Windows 전용 링크 불필요
+    # Create the IMPORTED static library targets
+    # On Android the Windows-only links such as ws2_32/crypt32 are not needed
     # -----------------------------------------------------------------------
     add_library(openssl_crypto STATIC IMPORTED GLOBAL)
     set_target_properties(openssl_crypto PROPERTIES
@@ -896,7 +931,24 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
     )
     add_dependencies(openssl_ssl openssl_make_build)
 
-    # 표준 네임스페이스 별칭
+    # -----------------------------------------------------------------------
+    # Propagate Android 16KB page alignment
+    #
+    # A static library (.a) has no notion of ELF segment alignment itself.
+    # 16KB alignment is decided when linking the final .so that swallows this .a,
+    # so the IMPORTED target must propagate the link options to its consumers.
+    # → Any library that links OpenSSL::SSL automatically becomes a 16KB-aligned .so.
+    #
+    # Android 15+ devices (and the Play Store requirements) mandate 16KB pages.
+    # -----------------------------------------------------------------------
+    set_property(TARGET openssl_crypto APPEND PROPERTY
+        INTERFACE_LINK_OPTIONS
+            "-Wl,-z,max-page-size=16384"
+            "-Wl,-z,common-page-size=16384"
+    )
+    message(STATUS "[OpenSSL] Android 16KB page alignment: -Wl,-z,max-page-size=16384")
+
+    # Standard namespaced aliases
     add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
     set_target_properties(OpenSSL::Crypto PROPERTIES
         INTERFACE_LINK_LIBRARIES      "openssl_crypto"
@@ -916,6 +968,8 @@ elseif ("${TARGET_OS}" STREQUAL "Android")
 
 else()
     message(FATAL_ERROR
-        "[OpenSSL] 지원하지 않는 빌드 조합: OS=${TARGET_OS}, Compiler=${TARGET_COMPILER}"
+        "[OpenSSL] Unsupported build combination: OS=${TARGET_OS}, Compiler=${TARGET_COMPILER}"
     )
 endif()
+
+endif() # OPENSSL_CMAKE_USE_PREBUILT

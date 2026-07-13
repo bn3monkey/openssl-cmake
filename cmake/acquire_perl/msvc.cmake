@@ -1,13 +1,13 @@
 # cmake/acquire_perl/msvc.cmake
-# Strawberry Perl (portable) 다운로드 및 설치
+# Downloads and installs Strawberry Perl (portable)
 #
-# 설정 가능 변수:
-#   STRAWBERRY_PERL_VERSION     - Perl 버전 (기본값: 5.42.0.1)
-#   STRAWBERRY_PERL_RELEASE_TAG - GitHub 릴리즈 태그 (기본값: SP_54201_64bit)
+# Configurable variables:
+#   STRAWBERRY_PERL_VERSION     - Perl version (default: 5.42.0.1)
+#   STRAWBERRY_PERL_RELEASE_TAG - GitHub release tag (default: SP_54201_64bit)
 #
-# 출력 변수:
-#   PERL_EXECUTABLE - perl.exe 전체 경로
-#   PERL_BIN_DIR    - perl.exe 가 있는 디렉토리
+# Output variables:
+#   PERL_EXECUTABLE - Full path to perl.exe
+#   PERL_BIN_DIR    - Directory containing perl.exe
 
 if (NOT DEFINED STRAWBERRY_PERL_VERSION)
     set(STRAWBERRY_PERL_VERSION "5.42.0.1")
@@ -20,10 +20,10 @@ endif()
 set(_perl_install_dir "${CMAKE_CURRENT_SOURCE_DIR}/tools/perl")
 set(_perl_zip         "${CMAKE_CURRENT_SOURCE_DIR}/tools/strawberry-perl.zip")
 
-# tools 디렉토리 생성
+# Create the tools directory
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 
-# 이미 설치된 경우 검색만 수행
+# If already installed, only perform the search
 file(GLOB_RECURSE _perl_exe_candidates "${_perl_install_dir}/perl.exe")
 
 if (NOT _perl_exe_candidates)
@@ -53,8 +53,8 @@ if (NOT _perl_exe_candidates)
 
     message(STATUS "[Perl] Extracting to ${_perl_install_dir}...")
     file(MAKE_DIRECTORY "${_perl_install_dir}")
-    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
-    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    # file(ARCHIVE_EXTRACT) is CMake 3.18+ only -> use cmake -E tar for 3.15 compatibility
+    # (it is libarchive-based, so it auto-detects zip from the extension)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E tar xf "${_perl_zip}"
         WORKING_DIRECTORY "${_perl_install_dir}"
@@ -62,7 +62,7 @@ if (NOT _perl_exe_candidates)
     )
     if (NOT _extract_result EQUAL 0)
         file(REMOVE "${_perl_zip}")
-        message(FATAL_ERROR "[Perl] zip 압축 해제 실패 (exit=${_extract_result}): ${_perl_zip}")
+        message(FATAL_ERROR "[Perl] zip extraction failed (exit=${_extract_result}): ${_perl_zip}")
     endif()
     file(REMOVE "${_perl_zip}")
 
@@ -79,7 +79,7 @@ else()
     message(STATUS "[Perl] Already installed, skipping download.")
 endif()
 
-# perl.exe 경로 중 site/bin 이 아닌 메인 perl.exe 선택
+# Among the perl.exe paths, pick the main perl.exe (not the one under site/bin)
 set(_perl_exe "")
 foreach(_candidate ${_perl_exe_candidates})
     if (NOT _candidate MATCHES "site[/\\\\]bin")

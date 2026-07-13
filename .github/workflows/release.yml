@@ -1,0 +1,263 @@
+name: Build prebuilt OpenSSL
+
+# Pushing a v* tag builds the static libraries for every platform and publishes
+# them as GitHub Release assets.
+#
+# Archive layout:
+#   include/openssl/*.h
+#   lib/libcrypto.{a,lib}
+#   lib/libssl.{a,lib}
+#   lib/*.pdb            (MSVC Debug only)
+#
+# Running via workflow_dispatch skips the release and leaves only the artifacts.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+
+  # =========================================================================
+  # CMakeLists.txt is the single source of truth for the OpenSSL version.
+  # Hardcoding 3.6.1 here would let it drift out of sync silently.
+  # =========================================================================
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      openssl_version: ${{ steps.v.outputs.openssl_version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version="$(sed -n 's/^set(OPENSSL_VERSION \([0-9.]*\)).*/\1/p' CMakeLists.txt)"
+          if [[ -z "$version" ]]; then
+            echo "could not parse OPENSSL_VERSION from CMakeLists.txt" >&2
+            exit 1
+          fi
+          echo "openssl_version=$version" >> "$GITHUB_OUTPUT"
+          echo "OpenSSL version: $version"
+
+  # =========================================================================
+  # Windows / MSVC x64  (Debug + Release)
+  #
+  # MSVC is the only platform that needs two archives: the CRT differs
+  # (/MD for Release vs /MDd for Debug), so linking a Release library into a
+  # Debug application produces LNK2038.
+  # =========================================================================
+  windows-msvc:
+    runs-on: windows-latest
+    needs: prepare
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Release, Debug]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # Use Ninja (single-config) together with CMAKE_BUILD_TYPE.
+      # Visual Studio generators are multi-config and leave CMAKE_BUILD_TYPE
+      # empty, which would always resolve OpenSSL's --debug check to Release.
+      - name: Configure and build
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja ^
+            -DOPENSSL_CMAKE_USE_PREBUILT=OFF ^
+            -DCMAKE_BUILD_TYPE=${{ matrix.config }}
+          cmake --build build
+
+      - name: Package
+        shell: bash
+        run: |
+          ./.github/scripts/package.sh \
+            --triple "windows-x64-msvc-$(echo ${{ matrix.config }} | tr '[:upper:]' '[:lower:]')" \
+            --build-dir build \
+            --lib-ext lib
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-msvc-${{ matrix.config }}
+          path: dist/*.tar.gz
+
+  # =========================================================================
+  # Windows / MinGW x64
+  #
+  # The MSYS2 MINGW64 environment is msvcrt based.
+  # Its CRT has to match Qt's bundled MinGW (e.g. Qt 5.15.2 / MinGW 8.1, msvcrt)
+  # for the libraries to link. Building in UCRT64 instead would break linking
+  # for msvcrt-based consumers.
+  # =========================================================================
+  windows-mingw:
+    runs-on: windows-latest
+    needs: prepare
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (MINGW64 / msvcrt)
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-ninja
+
+      # Configure with the native Windows cmake but point it at the MINGW64
+      # compilers. (The "MinGW Makefiles" generator refuses to run when sh.exe
+      # is on PATH, so use Ninja.)
+      - name: Configure and build
+        shell: pwsh
+        run: |
+          $mingw = "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
+          if (-not (Test-Path $mingw)) { $mingw = "C:\msys64\mingw64\bin" }
+          $env:PATH = "$mingw;$env:PATH"
+          cmake -S . -B build -G Ninja `
+            -DOPENSSL_CMAKE_USE_PREBUILT=OFF `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_C_COMPILER="$mingw\gcc.exe" `
+            -DCMAKE_CXX_COMPILER="$mingw\g++.exe"
+          cmake --build build
+
+      - name: Package
+        shell: bash
+        run: |
+          ./.github/scripts/package.sh \
+            --triple windows-x64-mingw-release \
+            --build-dir build \
+            --lib-ext a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64-mingw-release
+          path: dist/*.tar.gz
+
+  # =========================================================================
+  # Linux x64
+  # =========================================================================
+  linux:
+    runs-on: ubuntu-latest
+    needs: prepare
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Package
+        run: |
+          ./.github/scripts/package.sh \
+            --triple linux-x64-release \
+            --build-dir build \
+            --lib-ext a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64-release
+          path: dist/*.tar.gz
+
+  # =========================================================================
+  # Android (arm64-v8a, x86_64)
+  #
+  # Built at API 21, so any app with minSdk 21 or above can use it.
+  # (A library built for a lower API works on higher ones, not the other way.)
+  #
+  # 16 KB page alignment is not a property of the .a itself — it is decided when
+  # the final .so is linked. The IMPORTED target in CMakeLists propagates
+  # -Wl,-z,max-page-size=16384 to consumers, so no extra flag is needed here.
+  # =========================================================================
+  android:
+    runs-on: ubuntu-latest
+    needs: prepare
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Configure and build
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          cmake -S . -B build \
+            -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=${{ matrix.abi }} \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Package
+        run: |
+          ./.github/scripts/package.sh \
+            --triple android-${{ matrix.abi }}-release \
+            --build-dir build \
+            --lib-ext a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-${{ matrix.abi }}-release
+          path: dist/*.tar.gz
+
+  # =========================================================================
+  # Generate the manifest and publish the release
+  #
+  # The SHA256 hashes are shipped as a release asset rather than committed to
+  # the repo, which avoids the chicken-and-egg problem of needing the tag to
+  # exist before the build that produces the hashes can run.
+  # =========================================================================
+  publish:
+    needs: [prepare, windows-msvc, windows-mingw, linux, android]
+    runs-on: ubuntu-latest
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate manifest
+        run: ./.github/scripts/generate_manifest.sh artifacts "$OPENSSL_VERSION"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/prebuilt-manifest.cmake
+          generate_release_notes: true

@@ -1,14 +1,14 @@
 # cmake/acquire_jom.cmake
-# JOM (Qt의 병렬 nmake 대체재) 다운로드 및 설치 (Windows 전용)
+# Downloads and installs JOM (Qt's parallel nmake replacement) (Windows only)
 #
-# 설정 가능 변수:
-#   JOM_VERSION - JOM 버전 (기본값: 1_1_4)
+# Configurable variables:
+#   JOM_VERSION - JOM version (default: 1_1_4)
 #
-# 출력 변수:
-#   JOM_EXECUTABLE - jom.exe 전체 경로
-#   JOM_BIN_DIR    - jom.exe 가 있는 디렉토리
+# Output variables:
+#   JOM_EXECUTABLE - Full path to jom.exe
+#   JOM_BIN_DIR    - Directory containing jom.exe
 #
-# 다운로드 URL:
+# Download URL:
 #   https://download.qt.io/official_releases/jom/jom_<version>.zip
 
 if (NOT DEFINED JOM_VERSION)
@@ -18,10 +18,10 @@ endif()
 set(_jom_install_dir "${CMAKE_CURRENT_SOURCE_DIR}/tools/jom")
 set(_jom_zip         "${CMAKE_CURRENT_SOURCE_DIR}/tools/jom.zip")
 
-# tools 디렉토리 생성
+# Create the tools directory
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tools")
 
-# 이미 설치된 경우 검색만 수행
+# If already installed, only perform the search
 file(GLOB _jom_exe_candidates "${_jom_install_dir}/jom.exe")
 
 if (NOT _jom_exe_candidates)
@@ -54,15 +54,15 @@ if (NOT _jom_exe_candidates)
     if (NOT _download_ok)
         message(FATAL_ERROR
             "[JOM] All download URLs failed for JOM ${JOM_VERSION}.\n"
-            "수동으로 https://download.qt.io/official_releases/jom/ 에서 jom_${JOM_VERSION}.zip 을 받아\n"
-            "${_jom_install_dir} 에 압축 해제하거나, JOM_VERSION 변수를 확인하세요."
+            "Manually download jom_${JOM_VERSION}.zip from https://download.qt.io/official_releases/jom/ and\n"
+            "extract it into ${_jom_install_dir}, or check the JOM_VERSION variable."
         )
     endif()
 
     message(STATUS "[JOM] Extracting to ${_jom_install_dir}...")
     file(MAKE_DIRECTORY "${_jom_install_dir}")
-    # file(ARCHIVE_EXTRACT)는 CMake 3.18+ 전용 → 3.15 호환을 위해 cmake -E tar 사용
-    # (libarchive 기반이라 확장자로 zip 자동 감지)
+    # file(ARCHIVE_EXTRACT) is CMake 3.18+ only -> use cmake -E tar for 3.15 compatibility
+    # (it is libarchive-based, so it auto-detects zip from the extension)
     execute_process(
         COMMAND "${CMAKE_COMMAND}" -E tar xf "${_jom_zip}"
         WORKING_DIRECTORY "${_jom_install_dir}"
@@ -70,7 +70,7 @@ if (NOT _jom_exe_candidates)
     )
     if (NOT _extract_result EQUAL 0)
         file(REMOVE "${_jom_zip}")
-        message(FATAL_ERROR "[JOM] zip 압축 해제 실패 (exit=${_extract_result}): ${_jom_zip}")
+        message(FATAL_ERROR "[JOM] zip extraction failed (exit=${_extract_result}): ${_jom_zip}")
     endif()
     file(REMOVE "${_jom_zip}")
 

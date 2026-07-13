@@ -1,20 +1,20 @@
 # cmake/acquire_perl.cmake
-# 빌드 환경에 맞는 Perl 인터프리터를 획득한다.
+# Acquires a Perl interpreter appropriate for the build environment.
 #
-# 필요 변수:
-#   TARGET_OS       - 타겟 OS (Windows, Linux, Android)
-#   TARGET_COMPILER - 타겟 컴파일러 (msvc, mingw, gcc, clang)
+# Required variables:
+#   TARGET_OS       - Target OS (Windows, Linux, Android)
+#   TARGET_COMPILER - Target compiler (msvc, mingw, gcc, clang)
 #
-# 출력 변수 (플랫폼별 cmake에서 설정):
-#   PERL_EXECUTABLE - perl 실행 파일 전체 경로
-#   PERL_BIN_DIR    - perl 실행 파일이 위치한 디렉토리
+# Output variables (set by the per-platform cmake files):
+#   PERL_EXECUTABLE - Full path to the perl executable
+#   PERL_BIN_DIR    - Directory containing the perl executable
 
 if ("${TARGET_OS}" STREQUAL "Windows")
     if ("${TARGET_COMPILER}" STREQUAL "msvc")
-        # MSVC: Strawberry Perl portable 다운로드
+        # MSVC: download portable Strawberry Perl
         include(cmake/acquire_perl/msvc.cmake)
     elseif ("${TARGET_COMPILER}" STREQUAL "mingw")
-        # MinGW: MSYS2 설치 후 pacman으로 Perl 획득
+        # MinGW: install MSYS2, then acquire Perl via pacman
         include(cmake/acquire_perl/mingw.cmake)
     else()
         message(FATAL_ERROR "[Perl] Unsupported Windows compiler: ${TARGET_COMPILER}")
