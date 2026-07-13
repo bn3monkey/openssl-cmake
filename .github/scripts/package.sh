@@ -84,4 +84,10 @@ tar -czf "dist/${ARCHIVE}" -C "$PKG" include lib
 
 echo "[package] created dist/${ARCHIVE}"
 ls -lh "dist/${ARCHIVE}"
-tar -tzf "dist/${ARCHIVE}" | head -20
+
+# Listing is informational only. `| head` closes the pipe early, which makes tar
+# die on SIGPIPE and — under `set -o pipefail` — would fail the whole script.
+echo "[package] contents (libs + first few headers):"
+tar -tzf "dist/${ARCHIVE}" > /tmp/pkg-list.txt
+grep '^lib/' /tmp/pkg-list.txt || true
+grep -c '^include/' /tmp/pkg-list.txt | xargs -I{} echo "  include/: {} entries"
