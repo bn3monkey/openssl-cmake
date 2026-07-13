@@ -7,7 +7,6 @@ name: Build prebuilt OpenSSL
 #   include/openssl/*.h
 #   lib/libcrypto.{a,lib}
 #   lib/libssl.{a,lib}
-#   lib/*.pdb            (MSVC Debug only)
 #
 # Running via workflow_dispatch skips the release and leaves only the artifacts.
 

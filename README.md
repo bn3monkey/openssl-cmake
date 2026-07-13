@@ -118,7 +118,12 @@ CRT, so linking a Release (`/MD`) library into a Debug app produces `LNK2038`. F
 multi-config generators like Visual Studio, both archives are downloaded and wired up via
 `IMPORTED_LOCATION_DEBUG` / `IMPORTED_LOCATION_RELEASE`, so switching configuration in the
 IDE picks the right one automatically. `RelWithDebInfo` and `MinSizeRel` map to Release.
-The Debug archive includes PDBs, so you can step into OpenSSL internals.
+
+PDBs are not shipped. They are only usable with the matching OpenSSL sources, and the paths
+baked into a PDB point at the CI runner's filesystem, so you could not step into OpenSSL
+regardless. MSVC may emit `LNK4099` (PDB not found) when linking the Debug archive — it's a
+warning, not an error. If you need to debug into OpenSSL itself, build from source
+(method 2), which does produce and wire up PDBs.
 
 **MinGW** — Prebuilts are built in the MSYS2 `MINGW64` environment, which is **msvcrt**
 based. This matches the CRT of Qt's bundled MinGW (e.g. Qt 5.15.2 / MinGW 8.1), so they

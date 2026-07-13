@@ -11,7 +11,6 @@
 #   include/openssl/*.h
 #   lib/libcrypto.<ext>
 #   lib/libssl.<ext>
-#   lib/*.pdb              (MSVC Debug only)
 #
 # include/ has to be merged from two places:
 #   external/openssl/include/openssl  - the original public headers
@@ -73,12 +72,11 @@ find "${PKG}/include" -name '*.h.in' -delete
 cp "$CRYPTO_LIB" "${PKG}/lib/"
 cp "$SSL_LIB"    "${PKG}/lib/"
 
-# MSVC Debug: ship the PDBs so consumers can step into OpenSSL
-shopt -s nullglob
-for pdb in "${OSSL_BUILD}"/libcrypto.pdb "${OSSL_BUILD}"/libssl.pdb; do
-    cp "$pdb" "${PKG}/lib/"
-done
-shopt -u nullglob
+# PDBs are deliberately not shipped. They are only useful with the matching
+# OpenSSL sources, and the source paths baked into a PDB point at the CI
+# runner's filesystem, so consumers cannot step into OpenSSL anyway.
+# MSVC may emit LNK4099 (PDB not found) when linking the Debug archive; that is
+# a warning, not an error.
 
 mkdir -p dist
 ARCHIVE="openssl-${OPENSSL_VERSION}-${TRIPLE}.tar.gz"

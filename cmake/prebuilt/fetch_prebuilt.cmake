@@ -229,16 +229,6 @@ if (_ossl_msvc_multi)
         INTERFACE_LINK_LIBRARIES       "openssl_crypto"
     )
 
-    # PDBs shipped in the Debug archive (lets you step into OpenSSL)
-    if (EXISTS "${_dbg_dir}/lib/libcrypto.pdb")
-        set_target_properties(openssl_crypto PROPERTIES
-            IMPORTED_PDB_DEBUG "${_dbg_dir}/lib/libcrypto.pdb")
-    endif()
-    if (EXISTS "${_dbg_dir}/lib/libssl.pdb")
-        set_target_properties(openssl_ssl PROPERTIES
-            IMPORTED_PDB_DEBUG "${_dbg_dir}/lib/libssl.pdb")
-    endif()
-
 else()
 
     list(GET _ossl_triples 0 _ossl_t)
@@ -255,15 +245,6 @@ else()
         INTERFACE_INCLUDE_DIRECTORIES "${_ossl_include}"
         INTERFACE_LINK_LIBRARIES      "openssl_crypto"
     )
-
-    if (EXISTS "${_ossl_dir}/lib/libcrypto.pdb")
-        set_target_properties(openssl_crypto PROPERTIES
-            IMPORTED_PDB "${_ossl_dir}/lib/libcrypto.pdb")
-    endif()
-    if (EXISTS "${_ossl_dir}/lib/libssl.pdb")
-        set_target_properties(openssl_ssl PROPERTIES
-            IMPORTED_PDB "${_ossl_dir}/lib/libssl.pdb")
-    endif()
 
 endif()
 
