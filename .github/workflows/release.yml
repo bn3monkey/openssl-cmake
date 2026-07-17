@@ -187,12 +187,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # devtoolset gcc (glibc 2.17 target) is already on the image's PATH.
-      # We only need perl's IPC::Cmd (OpenSSL Configure requires it), make, and a
-      # recent CMake (pulled from a bundled CPython).
+      # OpenSSL 3.x's Configure needs a few perl core modules that CentOS 7's
+      # base perl does not ship: IPC::Cmd, Data::Dumper, and Time::Piece
+      # (Makefile.in stamps a date with it). Plus make and a recent CMake
+      # (pulled from a bundled CPython).
       - name: Build in manylinux2014 (glibc 2.17)
         run: |
           docker run --rm -v "$PWD":/work -w /work "${{ matrix.image }}" bash -euo pipefail -c '
-            yum install -y perl-IPC-Cmd perl-Data-Dumper make >/dev/null
+            yum install -y perl-IPC-Cmd perl-Data-Dumper perl-Time-Piece make >/dev/null
             export PATH="/opt/python/cp311-cp311/bin:$PATH"
             pip install --quiet cmake
             cmake -S . -B build \
