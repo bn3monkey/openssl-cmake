@@ -8,7 +8,7 @@
 #
 # Required variables:
 #   OPENSSL_VERSION            - e.g. 3.6.1
-#   OPENSSL_CMAKE_PREBUILT_TAG - release tag, e.g. v1.1.0
+#   OPENSSL_CMAKE_PREBUILT_TAG - release tag, e.g. v1.2.0
 #   TARGET_OS / TARGET_ARCH / TARGET_COMPILER
 #
 # Optional variables:
@@ -205,8 +205,8 @@ add_library(openssl_ssl    STATIC IMPORTED GLOBAL)
 
 if (_ossl_msvc_multi)
 
-    set(_rel_dir "${_ossl_prebuilt_root}/windows-x64-msvc-release")
-    set(_dbg_dir "${_ossl_prebuilt_root}/windows-x64-msvc-debug")
+    set(_rel_dir "${_ossl_prebuilt_root}/windows-${TARGET_ARCH}-msvc-release")
+    set(_dbg_dir "${_ossl_prebuilt_root}/windows-${TARGET_ARCH}-msvc-debug")
 
     set(_ossl_include "${_rel_dir}/include")
 

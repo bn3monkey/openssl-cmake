@@ -7,7 +7,7 @@ Android. Libraries are static (`no-shared`), so you don't have to ship OpenSSL D
 shared objects alongside your binary.
 
 - **OpenSSL version**: 3.6.1
-- **openssl-cmake version**: 1.1.0
+- **openssl-cmake version**: 1.2.0
 
 ---
 
@@ -19,7 +19,7 @@ include(FetchContent)
 FetchContent_Declare(
     openssl-cmake
     GIT_REPOSITORY https://github.com/bn3monkey/openssl-cmake.git
-    GIT_TAG        v1.1.0
+    GIT_TAG        v1.2.0
 )
 FetchContent_MakeAvailable(openssl-cmake)
 
@@ -83,7 +83,7 @@ cmake -B build -DOPENSSL_CMAKE_USE_PREBUILT=OFF
 
 **Reach for method 2 when:**
 
-- Your platform isn't in the supported list (Linux ARM64, Windows ARM64, macOS)
+- Your platform isn't in the supported list (macOS, Windows ARM64 MinGW, …)
 - You're offline or on a closed network (though see `OPENSSL_CMAKE_PREBUILT_URL` for
   internal mirrors)
 - Your Android `minSdk` is below 21
@@ -98,18 +98,19 @@ These are the combinations that ship prebuilt binaries.
 | Platform | Architecture | Compiler | Configurations |
 |---|---|---|---|
 | Windows | x64 | MSVC | Debug + Release |
+| Windows | arm64 | MSVC | Debug + Release |
 | Windows | x64 | MinGW (MSYS2 MINGW64 / msvcrt) | Release |
 | Linux | x64 | GCC / Clang | Release |
+| Linux | arm64 | GCC / Clang | Release |
 | Android | arm64-v8a | NDK Clang | Release (API 21+) |
 | Android | x86_64 | NDK Clang | Release (API 21+) |
 
-Requesting a prebuilt for a combination that isn't listed (Linux ARM64, macOS, …) **fails
-explicitly at configure time** with the supported list printed. It does not silently fall
-back to a source build, so your build will never mysteriously start taking 30 minutes. Use
-method 2 in that case.
+Requesting a prebuilt for a combination that isn't listed (Windows ARM64 MinGW, macOS, …)
+**fails explicitly at configure time** with the supported list printed. It does not silently
+fall back to a source build, so your build will never mysteriously start taking 30 minutes.
+Use method 2 in that case.
 
-Source builds additionally support Windows x86/ARM64, Linux x86/ARM/ARM64, and Android
-armeabi-v7a/x86.
+Source builds additionally support Windows x86, Linux x86/ARM, and Android armeabi-v7a/x86.
 
 ### Platform notes
 
@@ -131,8 +132,12 @@ link together. If you use a **UCRT-based toolchain** (MSYS2 `UCRT64`, the defaul
 MSYS2), the CRT differs and linking may break — build from source instead.
 
 **Linux** — GCC and Clang share the same archive. It's a static C library, so the two
-compilers are ABI-compatible here. It's built against glibc; on musl (Alpine, etc.) use
-method 2.
+compilers are ABI-compatible here. Both x64 and arm64 are built inside the
+`manylinux2014` container (**glibc 2.17**), so the archives link on virtually any modern
+distribution, including older toolchains like `gcc-toolset-11` on RHEL8. (Building against a
+newer glibc redirects `strtol`/`strtoll`/… to `__isoc23_*@GLIBC_2.38` symbols that older
+systems don't provide, producing `undefined reference to __isoc23_strtol` at link time —
+building against 2.17 avoids that entirely.) On musl (Alpine, etc.) use method 2.
 
 **Android** — Built at API 21. A library built for a lower API works on higher ones, so any
 app with `minSdk` 21 or above can use it. Below 21, use method 2.
@@ -169,7 +174,7 @@ llvm-readelf -l libyour_app.so | grep LOAD
 | Option | Default | Description |
 |---|---|---|
 | `OPENSSL_CMAKE_USE_PREBUILT` | `ON` | Set to `OFF` to build from source |
-| `OPENSSL_CMAKE_PREBUILT_TAG` | `v1.1.0` | Release tag to fetch prebuilts from |
+| `OPENSSL_CMAKE_PREBUILT_TAG` | `v1.2.0` | Release tag to fetch prebuilts from |
 | `OPENSSL_CMAKE_PREBUILT_URL` | (empty) | Override the asset base URL — for internal mirrors / air-gapped networks |
 
 ### Air-gapped networks
@@ -178,7 +183,7 @@ Copy the release assets (`*.tar.gz` and `prebuilt-manifest.cmake`) to an interna
 then:
 
 ```bash
-cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v1.1.0
+cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v1.2.0
 ```
 
 `file:///` URLs work too, so you can point at a local directory.
@@ -205,6 +210,21 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 ---
 
 ## Version history
+
+### v1.2.0
+**ARM64 prebuilts + older-glibc Linux archives.**
+
+- New prebuilt platforms: **Windows arm64 (MSVC, Debug + Release)** and **Linux arm64
+  (GCC / Clang)**. Linux arm64 shares one archive across gcc and clang, same as x64.
+- Windows arm64 is built natively on the `windows-11-arm` GitHub-hosted runner; Linux arm64
+  natively on `ubuntu-24.04-arm`.
+- **Linux archives are now built inside `manylinux2014` (glibc 2.17)** instead of on the
+  bare `ubuntu-latest` runner. Newer glibc (>= 2.38) redirects `strtol` & friends to
+  `__isoc23_*@GLIBC_2.38`, which broke linking on older toolchains (e.g. `gcc-toolset-11`
+  on RHEL8) with `undefined reference to __isoc23_strtol`. Building against glibc 2.17 fixes
+  this and makes the archives link on virtually any modern Linux.
+- Windows ARM64 MinGW is intentionally not shipped: there is no mainstream GCC
+  `aarch64-w64-mingw32` toolchain. Use MSVC (prebuilt) or build from source.
 
 ### v1.1.0
 **Prebuilt binary distribution.**
@@ -237,9 +257,9 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 
 ## Roadmap
 
-- **v1.2.0** — macOS support (Apple Silicon / Intel). There is currently no Darwin build
+- **v1.3.0** — macOS support (Apple Silicon / Intel). There is currently no Darwin build
   path, so source-build support has to come first.
-- Under consideration — Linux ARM64 prebuilts, a shared cross-project cache directory
+- Under consideration — a shared cross-project cache directory
 
 ---
 

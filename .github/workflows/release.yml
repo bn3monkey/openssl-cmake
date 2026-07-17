@@ -39,28 +39,37 @@ jobs:
           echo "OpenSSL version: $version"
 
   # =========================================================================
-  # Windows / MSVC x64  (Debug + Release)
+  # Windows / MSVC  (x64 + arm64, each Debug + Release)
   #
-  # MSVC is the only platform that needs two archives: the CRT differs
+  # MSVC is the only platform that needs two archives per arch: the CRT differs
   # (/MD for Release vs /MDd for Debug), so linking a Release library into a
   # Debug application produces LNK2038.
+  #
+  # x64 builds on windows-latest; arm64 builds natively on windows-11-arm
+  # (GA GitHub-hosted runner, free for public repos). A native runner means
+  # CMAKE_SYSTEM_PROCESSOR is genuinely ARM64, so detectTargetArchitecture()
+  # resolves to arm64 without any cross-compile CMAKE_SYSTEM_NAME juggling.
   # =========================================================================
   windows-msvc:
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     needs: prepare
     env:
       OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
     strategy:
       fail-fast: false
       matrix:
-        config: [Release, Debug]
+        include:
+          - { arch: x64,   config: Release, runner: windows-latest, msvc_arch: x64 }
+          - { arch: x64,   config: Debug,   runner: windows-latest, msvc_arch: x64 }
+          - { arch: arm64, config: Release, runner: windows-11-arm, msvc_arch: arm64 }
+          - { arch: arm64, config: Debug,   runner: windows-11-arm, msvc_arch: arm64 }
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup MSVC environment
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: x64
+          arch: ${{ matrix.msvc_arch }}
 
       - name: Setup Ninja
         uses: seanmiddleditch/gha-setup-ninja@v5
@@ -80,13 +89,13 @@ jobs:
         shell: bash
         run: |
           ./.github/scripts/package.sh \
-            --triple "windows-x64-msvc-$(echo ${{ matrix.config }} | tr '[:upper:]' '[:lower:]')" \
+            --triple "windows-${{ matrix.arch }}-msvc-$(echo ${{ matrix.config }} | tr '[:upper:]' '[:lower:]')" \
             --build-dir build \
             --lib-ext lib
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64-msvc-${{ matrix.config }}
+          name: windows-${{ matrix.arch }}-msvc-${{ matrix.config }}
           path: dist/*.tar.gz
 
   # =========================================================================
@@ -146,33 +155,62 @@ jobs:
           path: dist/*.tar.gz
 
   # =========================================================================
-  # Linux x64
+  # Linux (x64 + arm64)
+  #
+  # Built INSIDE the manylinux2014 container (CentOS 7 / glibc 2.17), NOT on the
+  # bare ubuntu-latest runner. ubuntu-latest ships glibc >= 2.38, whose headers
+  # redirect strtol() & friends to __isoc23_strtol@GLIBC_2.38. A static archive
+  # built there fails to link on older toolchains (e.g. gcc-toolset-11 on
+  # RHEL8/glibc 2.28) with "undefined reference to __isoc23_strtol". Building
+  # against glibc 2.17 keeps the references at plain strtol, so the archive links
+  # on virtually any modern Linux.
+  #
+  # arm64 runs on the native ubuntu-24.04-arm runner (GA, free for public repos),
+  # which executes the aarch64 container without QEMU.
+  #
+  # We drive the container with `docker run` (rather than a job-level `container:`)
+  # so that actions/checkout runs on the host — checkout@v4 uses Node 20, which
+  # needs glibc >= 2.28 and would not run inside the glibc-2.17 image.
   # =========================================================================
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     needs: prepare
     env:
       OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { triple: linux-x64-release,   runner: ubuntu-latest,   image: quay.io/pypa/manylinux2014_x86_64 }
+          - { triple: linux-arm64-release, runner: ubuntu-24.04-arm, image: quay.io/pypa/manylinux2014_aarch64 }
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure and build
+      # devtoolset gcc (glibc 2.17 target) is already on the image's PATH.
+      # We only need perl's IPC::Cmd (OpenSSL Configure requires it), make, and a
+      # recent CMake (pulled from a bundled CPython).
+      - name: Build in manylinux2014 (glibc 2.17)
         run: |
-          cmake -S . -B build \
-            -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          docker run --rm -v "$PWD":/work -w /work "${{ matrix.image }}" bash -euo pipefail -c '
+            yum install -y perl-IPC-Cmd perl-Data-Dumper make >/dev/null
+            export PATH="/opt/python/cp311-cp311/bin:$PATH"
+            pip install --quiet cmake
+            cmake -S . -B build \
+              -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build build
+          '
 
       - name: Package
         run: |
           ./.github/scripts/package.sh \
-            --triple linux-x64-release \
+            --triple ${{ matrix.triple }} \
             --build-dir build \
             --lib-ext a
 
       - uses: actions/upload-artifact@v4
         with:
-          name: linux-x64-release
+          name: ${{ matrix.triple }}
           path: dist/*.tar.gz
 
   # =========================================================================

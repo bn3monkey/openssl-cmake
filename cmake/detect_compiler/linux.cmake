@@ -1,8 +1,6 @@
 function(detectLinuxTargetCompiler OUT_VAR)
 
-    set(${OUT_VAR} "${result}" PARENT_SCOPE)
-
-        # Pre-check compiler existence
+    # Pre-check compiler existence
     find_program(GCC_PATH gcc)
     find_program(CLANG_PATH clang)
 

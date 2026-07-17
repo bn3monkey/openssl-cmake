@@ -28,7 +28,7 @@ message(STATUS "Target Compiler : ${TARGET_COMPILER}")
 set(OPENSSL_VERSION 3.6.1)
 
 # openssl-cmake's own version. Used as the default prebuilt release tag.
-set(OPENSSL_CMAKE_VERSION 1.1.0)
+set(OPENSSL_CMAKE_VERSION 1.2.0)
 
 
 # ===========================================================================

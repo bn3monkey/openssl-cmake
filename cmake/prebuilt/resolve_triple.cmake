@@ -15,13 +15,16 @@
 #   OUT_IS_MSVC_MULTI - TRUE if this is multi-config MSVC
 #
 # Triple naming:
-#   windows-x64-msvc-release / windows-x64-msvc-debug
+#   windows-x64-msvc-release   / windows-x64-msvc-debug
+#   windows-arm64-msvc-release / windows-arm64-msvc-debug
 #   windows-x64-mingw-release
-#   linux-x64-release
+#   linux-x64-release   / linux-arm64-release
 #   android-arm64-v8a-release / android-x86_64-release
 #
 #   Linux, Android and MinGW ship a single release archive.
-#   GCC/Clang static libraries link into debug applications without an ABI break.
+#   GCC/Clang static libraries link into debug applications without an ABI break,
+#   and on Linux the same archive serves both gcc and clang (ABI-compatible
+#   static C library), so the compiler is not part of the Linux triple.
 #   Only MSVC needs two, because the CRT differs (/MD vs /MDd).
 
 function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
@@ -31,7 +34,7 @@ function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
 
     if ("${TARGET_OS}" STREQUAL "Windows" AND "${TARGET_COMPILER}" STREQUAL "msvc")
 
-        if (NOT "${TARGET_ARCH}" STREQUAL "x64")
+        if (NOT ("${TARGET_ARCH}" STREQUAL "x64" OR "${TARGET_ARCH}" STREQUAL "arm64"))
             _opensslPrebuiltUnsupported("windows-${TARGET_ARCH}-msvc")
         endif()
 
@@ -39,13 +42,13 @@ function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
             # Visual Studio / Ninja Multi-Config:
             # the configuration is chosen at build time, so fetch both up front.
             set(_is_msvc_multi TRUE)
-            set(_triples "windows-x64-msvc-release" "windows-x64-msvc-debug")
+            set(_triples "windows-${TARGET_ARCH}-msvc-release" "windows-${TARGET_ARCH}-msvc-debug")
         else()
             string(TOLOWER "${CMAKE_BUILD_TYPE}" _bt)
             if (_bt STREQUAL "debug")
-                set(_triples "windows-x64-msvc-debug")
+                set(_triples "windows-${TARGET_ARCH}-msvc-debug")
             else()
-                set(_triples "windows-x64-msvc-release")
+                set(_triples "windows-${TARGET_ARCH}-msvc-release")
             endif()
         endif()
 
@@ -58,10 +61,10 @@ function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
 
     elseif ("${TARGET_OS}" STREQUAL "Linux")
 
-        if (NOT "${TARGET_ARCH}" STREQUAL "x64")
+        if (NOT ("${TARGET_ARCH}" STREQUAL "x64" OR "${TARGET_ARCH}" STREQUAL "arm64"))
             _opensslPrebuiltUnsupported("linux-${TARGET_ARCH}")
         endif()
-        set(_triples "linux-x64-release")
+        set(_triples "linux-${TARGET_ARCH}-release")
 
     elseif ("${TARGET_OS}" STREQUAL "Android")
 
@@ -89,11 +92,13 @@ macro(_opensslPrebuiltUnsupported _combo)
         "\n[OpenSSL] No prebuilt binaries are published for this combination: ${_combo}\n"
         "\n"
         "Supported:\n"
-        "  windows-x64-msvc   (Debug / Release)\n"
-        "  windows-x64-mingw  (MSYS2 MINGW64 / msvcrt)\n"
-        "  linux-x64\n"
-        "  android-arm64-v8a  (API 21+)\n"
-        "  android-x86_64     (API 21+)\n"
+        "  windows-x64-msvc    (Debug / Release)\n"
+        "  windows-arm64-msvc  (Debug / Release)\n"
+        "  windows-x64-mingw   (MSYS2 MINGW64 / msvcrt)\n"
+        "  linux-x64           (gcc / clang)\n"
+        "  linux-arm64         (gcc / clang)\n"
+        "  android-arm64-v8a   (API 21+)\n"
+        "  android-x86_64      (API 21+)\n"
         "\n"
         "To use OpenSSL here, build it from source:\n"
         "  cmake -DOPENSSL_CMAKE_USE_PREBUILT=OFF ...\n"
