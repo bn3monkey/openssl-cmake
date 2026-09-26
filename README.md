@@ -19,7 +19,7 @@ include(FetchContent)
 FetchContent_Declare(
     openssl-cmake
     GIT_REPOSITORY https://github.com/bn3monkey/openssl-cmake.git
-    GIT_TAG        v1.2.0
+    GIT_TAG        v1.3.0
 )
 FetchContent_MakeAvailable(openssl-cmake)
 
@@ -183,7 +183,7 @@ llvm-readelf -l libyour_app.so | grep LOAD
 | Option | Default | Description |
 |---|---|---|
 | `OPENSSL_CMAKE_USE_PREBUILT` | `ON` | Set to `OFF` to build from source |
-| `OPENSSL_CMAKE_PREBUILT_TAG` | `v1.2.0` | Release tag to fetch prebuilts from |
+| `OPENSSL_CMAKE_PREBUILT_TAG` | `v1.3.0` | Release tag to fetch prebuilts from |
 | `OPENSSL_CMAKE_PREBUILT_URL` | (empty) | Override the asset base URL — for internal mirrors / air-gapped networks |
 
 ### Air-gapped networks
@@ -192,7 +192,7 @@ Copy the release assets (`*.tar.gz` and `prebuilt-manifest.cmake`) to an interna
 then:
 
 ```bash
-cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v1.2.0
+cmake -B build -DOPENSSL_CMAKE_PREBUILT_URL=https://internal.example.com/openssl-cmake/v1.3.0
 ```
 
 `file:///` URLs work too, so you can point at a local directory.
