@@ -3,7 +3,7 @@
 # Maps the current build environment to a prebuilt archive triple.
 #
 # Required variables:
-#   TARGET_OS       - CMAKE_SYSTEM_NAME (Windows / Linux / Android)
+#   TARGET_OS       - CMAKE_SYSTEM_NAME (Windows / Linux / Darwin / Android)
 #   TARGET_ARCH     - result of detectTargetArchitecture() (x64 / x86 / arm64 / arm)
 #   TARGET_COMPILER - result of detectTargetCompiler() (msvc / mingw / gcc / clang)
 #   ANDROID_ABI     - Android only
@@ -19,12 +19,13 @@
 #   windows-arm64-msvc-release / windows-arm64-msvc-debug
 #   windows-x64-mingw-release
 #   linux-x64-release   / linux-arm64-release
+#   macos-x64-release   / macos-arm64-release
 #   android-arm64-v8a-release / android-x86_64-release
 #
-#   Linux, Android and MinGW ship a single release archive.
+#   Linux, macOS, Android and MinGW ship a single release archive.
 #   GCC/Clang static libraries link into debug applications without an ABI break,
-#   and on Linux the same archive serves both gcc and clang (ABI-compatible
-#   static C library), so the compiler is not part of the Linux triple.
+#   and on Linux/macOS the same archive serves both gcc and clang (ABI-compatible
+#   static C library), so the compiler is not part of the Linux/macOS triple.
 #   Only MSVC needs two, because the CRT differs (/MD vs /MDd).
 
 function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
@@ -66,6 +67,13 @@ function(resolveOpenSSLPrebuiltTriples OUT_TRIPLES OUT_IS_MSVC_MULTI)
         endif()
         set(_triples "linux-${TARGET_ARCH}-release")
 
+    elseif ("${TARGET_OS}" STREQUAL "Darwin")
+
+        if (NOT ("${TARGET_ARCH}" STREQUAL "x64" OR "${TARGET_ARCH}" STREQUAL "arm64"))
+            _opensslPrebuiltUnsupported("macos-${TARGET_ARCH}")
+        endif()
+        set(_triples "macos-${TARGET_ARCH}-release")
+
     elseif ("${TARGET_OS}" STREQUAL "Android")
 
         if ("${ANDROID_ABI}" STREQUAL "arm64-v8a" OR "${ANDROID_ABI}" STREQUAL "x86_64")
@@ -97,6 +105,8 @@ macro(_opensslPrebuiltUnsupported _combo)
         "  windows-x64-mingw   (MSYS2 MINGW64 / msvcrt)\n"
         "  linux-x64           (gcc / clang)\n"
         "  linux-arm64         (gcc / clang)\n"
+        "  macos-x64           (Intel)\n"
+        "  macos-arm64         (Apple Silicon)\n"
         "  android-arm64-v8a   (API 21+)\n"
         "  android-x86_64      (API 21+)\n"
         "\n"

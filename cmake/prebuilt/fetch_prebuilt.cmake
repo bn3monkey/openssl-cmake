@@ -10,6 +10,7 @@
 #   OPENSSL_VERSION            - e.g. 3.6.1
 #   OPENSSL_CMAKE_PREBUILT_TAG - release tag, e.g. v1.2.0
 #   TARGET_OS / TARGET_ARCH / TARGET_COMPILER
+#     TARGET_OS is CMAKE_SYSTEM_NAME (Windows / Linux / Darwin / Android)
 #
 # Optional variables:
 #   OPENSSL_CMAKE_PREBUILT_URL - override the asset base URL
@@ -185,6 +186,11 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     set(_ossl_crypto_name "libcrypto.a")
     set(_ossl_ssl_name    "libssl.a")
     set(_ossl_syslibs     "pthread;dl")
+elseif ("${TARGET_OS}" STREQUAL "Darwin")
+    # macOS: dl / pthread live in libc, so no extra system libs are needed.
+    set(_ossl_crypto_name "libcrypto.a")
+    set(_ossl_ssl_name    "libssl.a")
+    set(_ossl_syslibs     "")
 else() # Android
     set(_ossl_crypto_name "libcrypto.a")
     set(_ossl_ssl_name    "libssl.a")

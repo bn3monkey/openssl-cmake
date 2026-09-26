@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(openssl-cmake-windows C CXX)
+project(openssl-cmake-desktop C CXX)
 
 add_subdirectory(../../ ${CMAKE_CURRENT_BINARY_DIR}/origin)
 

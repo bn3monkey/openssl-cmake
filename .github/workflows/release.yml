@@ -216,6 +216,55 @@ jobs:
           path: dist/*.tar.gz
 
   # =========================================================================
+  # macOS (arm64 + x64)
+  #
+  # Built natively on GitHub-hosted runners: macos-14 is Apple Silicon (arm64),
+  # macos-13 is Intel (x64). A native runner means CMAKE_SYSTEM_PROCESSOR is the
+  # genuine arch, so detectTargetArchitecture() resolves without cross-compile
+  # juggling. Perl and make ship with the runner's Xcode Command Line Tools.
+  #
+  # MACOSX_DEPLOYMENT_TARGET pins the archive's minimum macOS version; the
+  # CMakeLists forwards it to OpenSSL Configure as -mmacosx-version-min.
+  #
+  # OpenSSL Configure builds a single architecture, so arm64 and x64 ship as
+  # separate archives (no universal/lipo binary).
+  # =========================================================================
+  macos:
+    runs-on: ${{ matrix.runner }}
+    needs: prepare
+    env:
+      OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { triple: macos-arm64-release, runner: macos-14 }
+          - { triple: macos-x64-release,   runner: macos-13 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
+        run: |
+          cmake -S . -B build \
+            -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          cmake --build build
+
+      - name: Package
+        run: |
+          ./.github/scripts/package.sh \
+            --triple ${{ matrix.triple }} \
+            --build-dir build \
+            --lib-ext a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.triple }}
+          path: dist/*.tar.gz
+
+  # =========================================================================
   # Android (arm64-v8a, x86_64)
   #
   # Built at API 21, so any app with minSdk 21 or above can use it.
@@ -275,7 +324,7 @@ jobs:
   # exist before the build that produces the hashes can run.
   # =========================================================================
   publish:
-    needs: [prepare, windows-msvc, windows-mingw, linux, android]
+    needs: [prepare, windows-msvc, windows-mingw, linux, macos, android]
     runs-on: ubuntu-latest
     env:
       OPENSSL_VERSION: ${{ needs.prepare.outputs.openssl_version }}

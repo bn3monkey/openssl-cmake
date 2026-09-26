@@ -102,10 +102,12 @@ These are the combinations that ship prebuilt binaries.
 | Windows | x64 | MinGW (MSYS2 MINGW64 / msvcrt) | Release |
 | Linux | x64 | GCC / Clang | Release |
 | Linux | arm64 | GCC / Clang | Release |
+| macOS | arm64 | Clang (Apple Silicon) | Release |
+| macOS | x64 | Clang (Intel) | Release |
 | Android | arm64-v8a | NDK Clang | Release (API 21+) |
 | Android | x86_64 | NDK Clang | Release (API 21+) |
 
-Requesting a prebuilt for a combination that isn't listed (Windows ARM64 MinGW, macOS, …)
+Requesting a prebuilt for a combination that isn't listed (Windows ARM64 MinGW, …)
 **fails explicitly at configure time** with the supported list printed. It does not silently
 fall back to a source build, so your build will never mysteriously start taking 30 minutes.
 Use method 2 in that case.
@@ -138,6 +140,13 @@ distribution, including older toolchains like `gcc-toolset-11` on RHEL8. (Buildi
 newer glibc redirects `strtol`/`strtoll`/… to `__isoc23_*@GLIBC_2.38` symbols that older
 systems don't provide, producing `undefined reference to __isoc23_strtol` at link time —
 building against 2.17 avoids that entirely.) On musl (Alpine, etc.) use method 2.
+
+**macOS** — Apple Silicon (`arm64`) and Intel (`x64`) ship as **separate archives**;
+OpenSSL builds a single architecture at a time, so there is no universal/`lipo` binary. The
+prebuilts are built with `MACOSX_DEPLOYMENT_TARGET=11.0`, so they run on macOS 11 (Big Sur)
+and later. To target an older macOS, build from source (method 2) with
+`-DCMAKE_OSX_DEPLOYMENT_TARGET=<version>`, which is forwarded to OpenSSL as
+`-mmacosx-version-min`. No extra system libraries are needed (`dl`/`pthread` live in libc).
 
 **Android** — Built at API 21. A library built for a lower API works on higher ones, so any
 app with `minSdk` 21 or above can use it. Below 21, use method 2.
@@ -211,6 +220,19 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 
 ## Version history
 
+### v1.3.0
+**macOS support.**
+
+- New target OS **macOS (Darwin)** for both source builds and prebuilts, on **Apple Silicon
+  (`arm64`)** and **Intel (`x64`)**. OpenSSL Configure targets `darwin64-arm64-cc` /
+  `darwin64-x86_64-cc`.
+- Prebuilt triples `macos-arm64-release` / `macos-x64-release`, built natively on the
+  `macos-14` (Apple Silicon) and `macos-13` (Intel) GitHub-hosted runners.
+- Archives are built with `MACOSX_DEPLOYMENT_TARGET=11.0`; source builds forward
+  `-DCMAKE_OSX_DEPLOYMENT_TARGET=<version>` to OpenSSL as `-mmacosx-version-min`.
+- The example project `prj/windows` is renamed to `prj/desktop` — its CMake/source were
+  already platform-agnostic and build on Windows, Linux and macOS unchanged.
+
 ### v1.2.0
 **ARM64 prebuilts + older-glibc Linux archives.**
 
@@ -257,8 +279,7 @@ have many projects and clean often, point `FETCHCONTENT_BASE_DIR` at a shared pa
 
 ## Roadmap
 
-- **v1.3.0** — macOS support (Apple Silicon / Intel). There is currently no Darwin build
-  path, so source-build support has to come first.
+- Under consideration — macOS universal (`arm64` + `x86_64`) binaries via `lipo`
 - Under consideration — a shared cross-project cache directory
 
 ---

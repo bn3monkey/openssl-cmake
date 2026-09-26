@@ -2,7 +2,7 @@
 # Acquires a Perl interpreter appropriate for the build environment.
 #
 # Required variables:
-#   TARGET_OS       - Target OS (Windows, Linux, Android)
+#   TARGET_OS       - Target OS (Windows, Linux, Darwin, Android)
 #   TARGET_COMPILER - Target compiler (msvc, mingw, gcc, clang)
 #
 # Output variables (set by the per-platform cmake files):
@@ -22,6 +22,9 @@ if ("${TARGET_OS}" STREQUAL "Windows")
 
 elseif ("${TARGET_OS}" STREQUAL "Linux")
     include(cmake/acquire_perl/linux.cmake)
+
+elseif ("${TARGET_OS}" STREQUAL "Darwin")
+    include(cmake/acquire_perl/darwin.cmake)
 
 elseif ("${TARGET_OS}" STREQUAL "Android")
     include(cmake/acquire_perl/android.cmake)

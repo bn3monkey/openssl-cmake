@@ -28,7 +28,7 @@ message(STATUS "Target Compiler : ${TARGET_COMPILER}")
 set(OPENSSL_VERSION 3.6.1)
 
 # openssl-cmake's own version. Used as the default prebuilt release tag.
-set(OPENSSL_CMAKE_VERSION 1.2.0)
+set(OPENSSL_CMAKE_VERSION 1.3.0)
 
 
 # ===========================================================================
@@ -645,6 +645,180 @@ elseif ("${TARGET_OS}" STREQUAL "Linux")
     )
 
     message(STATUS "[OpenSSL] Linux build targets ready: OpenSSL::Crypto, OpenSSL::SSL (make -j${_cpu_count})")
+    message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
+
+# ===========================================================================
+# BUILD: macOS  (Darwin, AppleClang)
+#
+# Structurally identical to the Linux path (system Perl + make), differing only
+# in the OpenSSL Configure target per architecture and in that macOS needs no
+# extra system link libraries (dl / pthread live in libc).
+# ===========================================================================
+elseif ("${TARGET_OS}" STREQUAL "Darwin")
+
+    # -----------------------------------------------------------------------
+    # Step 1. Acquire Perl (use the system Perl)
+    # -----------------------------------------------------------------------
+    include(cmake/acquire_perl.cmake)
+    # → sets PERL_EXECUTABLE, PERL_BIN_DIR
+
+    # -----------------------------------------------------------------------
+    # Step 2. Determine the OpenSSL configure target per architecture
+    #   Apple Silicon → darwin64-arm64-cc / Intel → darwin64-x86_64-cc
+    #   (OpenSSL Configure builds a single architecture; a universal binary
+    #    would require building each arch and combining them with lipo.)
+    # -----------------------------------------------------------------------
+    if ("${TARGET_ARCH}" STREQUAL "arm64")
+        set(_openssl_configure_target "darwin64-arm64-cc")
+    elseif ("${TARGET_ARCH}" STREQUAL "x64")
+        set(_openssl_configure_target "darwin64-x86_64-cc")
+    else()
+        message(FATAL_ERROR
+            "[OpenSSL] Unsupported architecture for the macOS build: ${TARGET_ARCH}\n"
+            "Supported: arm64, x64"
+        )
+    endif()
+    message(STATUS "[OpenSSL] Configure target : ${_openssl_configure_target}")
+
+    # -----------------------------------------------------------------------
+    # Determine the build type
+    # -----------------------------------------------------------------------
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _build_type_lower)
+    if (_build_type_lower STREQUAL "debug")
+        set(_openssl_debug_flags "--debug")
+        message(STATUS "[OpenSSL] Build type : Debug (debug symbols ON)")
+    else()
+        set(_openssl_debug_flags "")
+        message(STATUS "[OpenSSL] Build type : ${CMAKE_BUILD_TYPE} (debug symbols OFF)")
+    endif()
+
+    # -----------------------------------------------------------------------
+    # Step 3. Run perl Configure (at CMake configure-time)
+    #
+    # Pass the deployment target through to OpenSSL when the consumer set one,
+    # so the archive's minimum macOS version matches the rest of the build.
+    # -----------------------------------------------------------------------
+    file(MAKE_DIRECTORY "${openssl_BINARY_DIR}")
+
+    if (CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(_openssl_cflags "-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+        message(STATUS "[OpenSSL] Deployment target : ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+    else()
+        set(_openssl_cflags "")
+    endif()
+
+    message(STATUS "[OpenSSL] Running: perl Configure ${_openssl_configure_target} ${_openssl_debug_flags}")
+    message(STATUS "[OpenSSL]   source : ${openssl_SOURCE_DIR}")
+    message(STATUS "[OpenSSL]   build  : ${openssl_BINARY_DIR}")
+
+    execute_process(
+        COMMAND
+            "${PERL_EXECUTABLE}" "${openssl_SOURCE_DIR}/Configure"
+            "${_openssl_configure_target}"
+            ${_openssl_debug_flags}
+            ${_openssl_cflags}   # -mmacosx-version-min=... when set, else empty
+            no-shared       # build static libraries only
+            no-makedepend   # speeds up the build
+        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+        RESULT_VARIABLE   _configure_result
+        OUTPUT_VARIABLE   _configure_output
+        ERROR_VARIABLE    _configure_error
+    )
+    # Dropped ECHO_*_VARIABLE (3.18+) → 3.15 compatible. Print the captured output afterwards.
+    message(STATUS "${_configure_output}")
+
+    if (NOT _configure_result EQUAL 0)
+        message(FATAL_ERROR
+            "[OpenSSL] perl Configure failed (exit=${_configure_result}):\n"
+            "${_configure_error}"
+        )
+    endif()
+
+    message(STATUS "[OpenSSL] Configure done.")
+
+    # -----------------------------------------------------------------------
+    # Step 4. make build → produces libcrypto.a, libssl.a
+    # -----------------------------------------------------------------------
+    set(_openssl_crypto_lib "${openssl_BINARY_DIR}/libcrypto.a")
+    set(_openssl_ssl_lib    "${openssl_BINARY_DIR}/libssl.a")
+    set(_openssl_include
+        "${openssl_BINARY_DIR}/include"
+        "${openssl_SOURCE_DIR}/include"
+    )
+
+    find_program(_macos_make_exe
+        NAMES make gmake
+        DOC "make for macOS OpenSSL build"
+    )
+    if (NOT _macos_make_exe)
+        message(FATAL_ERROR
+            "[OpenSSL] Could not find make.\n"
+            "Install the Xcode Command Line Tools with:\n"
+            "  xcode-select --install"
+        )
+    endif()
+    message(STATUS "[OpenSSL] make : ${_macos_make_exe}")
+
+    include(ProcessorCount)
+    ProcessorCount(_cpu_count)
+    if (_cpu_count EQUAL 0)
+        set(_cpu_count 4)
+    endif()
+    message(STATUS "[OpenSSL] make parallel jobs : ${_cpu_count}")
+
+    add_custom_command(
+        OUTPUT
+            "${_openssl_crypto_lib}"
+            "${_openssl_ssl_lib}"
+        COMMAND ${CMAKE_COMMAND} -E env
+            "PATH=${PERL_BIN_DIR}:$ENV{PATH}"
+            "${_macos_make_exe}" -j${_cpu_count} build_libs
+        WORKING_DIRECTORY "${openssl_BINARY_DIR}"
+        COMMENT "[OpenSSL] Building OpenSSL with make -j${_cpu_count} build_libs..."
+        USES_TERMINAL
+        VERBATIM
+    )
+
+    add_custom_target(openssl_make_build ALL
+        DEPENDS
+            "${_openssl_crypto_lib}"
+            "${_openssl_ssl_lib}"
+        COMMENT "[OpenSSL] Ensuring OpenSSL libraries are built."
+    )
+
+    # -----------------------------------------------------------------------
+    # Create the IMPORTED static library targets
+    # macOS needs no extra system libs (dl / pthread live in libc).
+    # -----------------------------------------------------------------------
+    add_library(openssl_crypto STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_crypto PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_crypto_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+    add_dependencies(openssl_crypto openssl_make_build)
+
+    add_library(openssl_ssl STATIC IMPORTED GLOBAL)
+    set_target_properties(openssl_ssl PROPERTIES
+        IMPORTED_LOCATION             "${_openssl_ssl_lib}"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+    )
+    add_dependencies(openssl_ssl openssl_make_build)
+
+    # Standard namespaced aliases
+    add_library(OpenSSL::Crypto INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::Crypto PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    add_library(OpenSSL::SSL INTERFACE IMPORTED GLOBAL)
+    set_target_properties(OpenSSL::SSL PROPERTIES
+        INTERFACE_LINK_LIBRARIES      "openssl_ssl;openssl_crypto"
+        INTERFACE_INCLUDE_DIRECTORIES "${_openssl_include}"
+    )
+
+    message(STATUS "[OpenSSL] macOS build targets ready: OpenSSL::Crypto, OpenSSL::SSL (make -j${_cpu_count})")
     message(STATUS "[OpenSSL]   Link with: target_link_libraries(<your_target> OpenSSL::SSL)")
 
 # ===========================================================================
