@@ -2,6 +2,17 @@ function(detectTargetArchitecture OUT_VAR)
 
     if (ANDROID)
         set(_arch "${ANDROID_ABI}")
+    elseif (APPLE AND CMAKE_OSX_ARCHITECTURES)
+        # Honor an explicit target arch so x86_64 can be cross-built on an Apple
+        # Silicon host (and vice versa). A universal (multi-arch) request is
+        # ambiguous here — OpenSSL builds one arch at a time — so reject it.
+        list(LENGTH CMAKE_OSX_ARCHITECTURES _osx_arch_count)
+        if (_osx_arch_count GREATER 1)
+            message(FATAL_ERROR
+                "Multiple CMAKE_OSX_ARCHITECTURES (${CMAKE_OSX_ARCHITECTURES}) are not "
+                "supported — there is no universal binary. Build one architecture at a time.")
+        endif()
+        set(_arch "${CMAKE_OSX_ARCHITECTURES}")
     else()
         set(_arch "${CMAKE_SYSTEM_PROCESSOR}")
     endif()

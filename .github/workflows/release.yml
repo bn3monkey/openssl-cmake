@@ -218,10 +218,13 @@ jobs:
   # =========================================================================
   # macOS (arm64 + x64)
   #
-  # Built natively on GitHub-hosted runners: macos-14 is Apple Silicon (arm64),
-  # macos-13 is Intel (x64). A native runner means CMAKE_SYSTEM_PROCESSOR is the
-  # genuine arch, so detectTargetArchitecture() resolves without cross-compile
-  # juggling. Perl and make ship with the runner's Xcode Command Line Tools.
+  # Both archives are built on macos-14 (Apple Silicon). arm64 is native; x64 is
+  # cross-compiled with -DCMAKE_OSX_ARCHITECTURES=x86_64 — Apple's clang and the
+  # macOS SDK are universal, and OpenSSL's darwin64-x86_64-cc target carries
+  # `-arch x86_64`, so a genuine x86_64 archive is produced without an Intel
+  # runner. (Intel macos-13 runners queue indefinitely / are being retired, so
+  # we do not rely on them.) detectTargetArchitecture() honors
+  # CMAKE_OSX_ARCHITECTURES, so the cross build resolves to x64 → darwin64-x86_64-cc.
   #
   # MACOSX_DEPLOYMENT_TARGET pins the archive's minimum macOS version; the
   # CMakeLists forwards it to OpenSSL Configure as -mmacosx-version-min.
@@ -239,8 +242,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { triple: macos-arm64-release, runner: macos-14 }
-          - { triple: macos-x64-release,   runner: macos-13 }
+          - { triple: macos-arm64-release, runner: macos-14, osx_arch: arm64 }
+          - { triple: macos-x64-release,   runner: macos-14, osx_arch: x86_64 }
     steps:
       - uses: actions/checkout@v4
 
@@ -249,7 +252,8 @@ jobs:
           cmake -S . -B build \
             -DOPENSSL_CMAKE_USE_PREBUILT=OFF \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.osx_arch }}
           cmake --build build
 
       - name: Package
